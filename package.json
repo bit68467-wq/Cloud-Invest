@@ -1,7 +1,8 @@
 {
   "name": "cloud-invest",
   "version": "1.0.0",
-  "description": "You3invest Web Service on Render",
+  "private": true,
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
