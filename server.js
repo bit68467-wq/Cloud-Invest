@@ -535,7 +535,7 @@ async function confirmEmailVerification(request, env) {
   if (user.email_verified) return bad("Questo indirizzo email è già verificato.");
   
   const requestRow = await env.DB.prepare("SELECT * FROM email_verification_requests WHERE user_id = ?").bind(user.id).first();
-  if (!requestRow?.otp_hash || !requestRow.otp_salt || !requestRow.otp_expires_at || requestRow.otp_expires_at < Date.now()) return bad("OTP assente o scaduto. Richiedi un nuovo codice all'amministratore.");
+  if (!requestRow?.otp_hash || !requestRow.otp_salt || !requestRow.otp_expires_at || requestRow.otp_expires_at < Date.now()) return bad("OTP assente o scaduto. Chiedi il codice all'amministratore.");
   if (requestRow.otp_attempts >= 5) return bad("Troppi tentativi.");
   
   if (await hash(otp, requestRow.otp_salt) !== requestRow.otp_hash) {
@@ -571,7 +571,7 @@ async function setUserVerificationOtp(request, env, userId) {
     await env.DB.prepare(
       "INSERT INTO sensitive_action_verifications (user_id, action, payload_json, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) " +
       "VALUES (?, 'withdrawal', '{}', ?, ?, ?, ?, 0, ?, ?) " +
-      "ON CONFLICT(user_id) DO UPDATE SET otp_hash = excluded.otp_hash, otp_salt = excluded.otp_salt, otp_expires_at = excluded.otp_expires_at, otp_attempts = 0"
+      "ON CONFLICT(user_id) DO UPDATE SET otp_hash = excluded.otp_hash, otp_salt = excluded.otp_salt, otp_expires_at = excluded.otp_expires_at, otp_attempts = 0, issued_at = excluded.issued_at, issued_by = excluded.issued_by, consumed_at = NULL"
     ).bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
   } else {
     const row = await env.DB.prepare("SELECT user_id FROM email_verification_requests WHERE user_id = ?").bind(userId).first();
@@ -584,10 +584,9 @@ async function setUserVerificationOtp(request, env, userId) {
     }
   }
 
-  if (notify) {
-    await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
-      .bind(userId, "Codice OTP verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
-  }
+  // Invio della notifica con l'OTP direttamente nel pannello notifiche dell'utente
+  await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
+    .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
 
   return Response.json({ ok: true, expiresAt });
 }
@@ -642,6 +641,8 @@ function bad(msg) { return Response.json({ error: msg }, { status: 400 }); }
 
 async function getNotifications(request, env) {
   const user = await authed(request, env);
+  const now = Date.now();
+  await env.DB.prepare("DELETE FROM notifications WHERE user_id = ? AND expires_at IS NOT NULL AND expires_at <= ?").bind(user.id, now).run();
   const rows = await env.DB.prepare("SELECT id, kind, title, message, created_at, read_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50").bind(user.id).all();
   const unread = await env.DB.prepare("SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL").bind(user.id).first();
   return Response.json({ notifications: rows.results, unread: unread.count });
@@ -1014,7 +1015,8 @@ async function initDb() {
       title TEXT NOT NULL,
       message TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      read_at INTEGER
+      read_at INTEGER,
+      expires_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS admin_credentials (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1029,6 +1031,11 @@ async function initDb() {
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS admin_login_attempts (
+      user_id TEXT PRIMARY KEY,
+      failures INTEGER NOT NULL DEFAULT 0,
+      locked_until INTEGER NOT NULL DEFAULT 0
     );
   `);
 }
