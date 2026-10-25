@@ -1,14 +1,13 @@
 {
   "name": "cloud-invest",
   "version": "1.0.0",
-  "private": true,
-  "description": "You3invest Cloudflare Worker Application",
+  "description": "You3invest Web Service on Render",
   "main": "server.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "start": "node server.js"
   },
-  "devDependencies": {
-    "wrangler": "^4.152.0"
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "express": "^4.19.2"
   }
 }
