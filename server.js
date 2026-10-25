@@ -626,9 +626,6 @@ async function markNotificationsRead(request, env) {
   return Response.json({ ok: true });
 }
 
-  return Response.json({ ok: true });
-}
-
 async function deposit(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
