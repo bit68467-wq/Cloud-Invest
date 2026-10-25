@@ -1,3 +1,57 @@
+import Database from 'better-sqlite3';
+import http from 'http';
+
+// Inizializzazione del database SQLite locale con better-sqlite3
+const sqliteDb = new Database('database.sqlite');
+sqliteDb.pragma('journal_mode = WAL');
+
+// Adattatore D1 per la compatibilità con better-sqlite3
+const dbAdapter = {
+  exec(sql) {
+    sqliteDb.exec(sql);
+  },
+  prepare(sql) {
+    const stmt = sqliteDb.prepare(sql);
+    const wrap = (boundArgs = []) => ({
+      async first() {
+        return stmt.get(...boundArgs) || null;
+      },
+      async all() {
+        const results = stmt.all(...boundArgs);
+        return { results };
+      },
+      async run() {
+        const info = stmt.run(...boundArgs);
+        return { meta: { changes: info.changes, lastRowid: info.lastInsertRowid } };
+      },
+      _runSync() {
+        const info = stmt.run(...boundArgs);
+        return { meta: { changes: info.changes, lastRowid: info.lastInsertRowid } };
+      }
+    });
+
+    const boundObj = wrap([]);
+    boundObj.bind = (...args) => wrap(args.flat());
+    boundObj.first = (...args) => stmt.get(...args) || null;
+    boundObj.all = (...args) => ({ results: stmt.all(...args) });
+    boundObj.run = (...args) => {
+      const info = stmt.run(...args);
+      return { meta: { changes: info.changes, lastRowid: info.lastInsertRowid } };
+    };
+    return boundObj;
+  },
+  async batch(statements) {
+    const results = [];
+    const runTx = sqliteDb.transaction((stmts) => {
+      for (const s of stmts) {
+        results.push(s._runSync());
+      }
+    });
+    runTx(statements);
+    return results;
+  }
+};
+
 const DAY = 86400000;
 const PLANS = [
   { days: 10, rate: 1.0, min: 50 },
@@ -227,7 +281,7 @@ async function fullState(env, user, request) {
 
 let schemaPromise;
 
-export default {
+const exportedApp = {
   async fetch(request, env) {
     if (!schemaPromise) schemaPromise = (async () => {
       await env.DB.exec(`
@@ -989,7 +1043,7 @@ async function reviewWalletChange(env, actor, id, action) {
     const result = await env.DB.batch(statements);
     if (!result[statusIndex]?.meta?.changes) return bad("Richiesta già gestita.");
   } catch (error) {
-    if (String(error).includes("UNIQUE")) return bad("L’indirizzo è già associato a un altro account per questa rete.");
+    if (String(error).includes("UNIQUE")) return bad("L’indirizzo è già associato a un altro account.");
     throw error;
   }
   return Response.json({ ok: true, status: "approved" });
@@ -1259,3 +1313,61 @@ async function changePassword(request, env) {
   ]);
   return Response.json({ ok: true });
 }
+
+// -----------------------------------------------------------------
+// WRAPPER HTTP PER RENDER (AVVIO DEL SERVER LOCALE)
+// -----------------------------------------------------------------
+const PORT = process.env.PORT || 3000;
+const server = http.createServer(async (req, res) => {
+  try {
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers['host'] || `localhost:${PORT}`;
+    const url = `${protocol}://${host}${req.url}`;
+    
+    let bodyChunks = [];
+    for await (const chunk of req) {
+      bodyChunks.push(chunk);
+    }
+    const bodyBuffer = Buffer.concat(bodyChunks);
+    
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (Array.isArray(value)) {
+        for (const v of value) headers.append(key, v);
+      } else if (value) {
+        headers.set(key, value);
+      }
+    }
+    
+    const init = {
+      method: req.method,
+      headers,
+    };
+    
+    if (!['GET', 'HEAD'].includes(req.method) && bodyBuffer.length > 0) {
+      init.body = bodyBuffer;
+    }
+    
+    const request = new Request(url, init);
+    const env = { DB: dbAdapter };
+    
+    const response = await exportedApp.fetch(request, env);
+    
+    res.statusCode = response.status;
+    response.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+    
+    const responseBuffer = Buffer.from(await response.arrayBuffer());
+    res.end(responseBuffer);
+  } catch (err) {
+    console.error('Server error:', err);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Internal Server Error', details: err.message }));
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
