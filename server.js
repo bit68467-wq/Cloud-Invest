@@ -1,8 +1,7 @@
 import express from 'express';
-import Database from 'better-sqlite3';
+import { createClient } from '@libsql/client';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,12 +9,13 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configurazione database SQLite persistente su Render (supporta Render Persistent Disk o variabile d'ambiente)
-const dbPath = process.env.DATABASE_PATH || (fs.existsSync('/data') ? '/data/database.sqlite' : 'database.sqlite');
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
+// Connessione a Turso Cloud (Database persistente esterno)
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
-// Adattatore D1/SQLite compatibile al 100% con la logica originale
+// Adattatore compatibile con la logica originale
 const env = {
   DB: {
     prepare(sql) {
@@ -24,34 +24,40 @@ const env = {
           const params = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
           return {
             async all() {
-              const stmt = db.prepare(sql);
-              return { results: stmt.all(...params) };
+              const rs = await db.execute({ sql, args: params });
+              return { results: rs.rows };
             },
             async first() {
-              const stmt = db.prepare(sql);
-              return stmt.get(...params) || null;
+              const rs = await db.execute({ sql, args: params });
+              return rs.rows[0] || null;
             },
             async run() {
-              const stmt = db.prepare(sql);
-              const info = stmt.run(...params);
-              return { meta: { changes: info.changes, last_row_id: info.lastInsertRowid } };
+              const rs = await db.execute({ sql, args: params });
+              return { meta: { changes: rs.rowsAffected, last_row_id: Number(rs.lastInsertRowid) } };
             }
           };
         },
-        async all(...params) { return this.bind(...params).all(); },
-        async first(...params) { return this.bind(...params).first(); },
-        async run(...params) { return this.bind(...params).run(); }
+        async all(...params) { return (await this.bind(...params)).all(); },
+        async first(...params) { return (await this.bind(...params)).first(); },
+        async run(...params) { return (await this.bind(...params)).run(); }
       };
     },
-    async exec(sql) { db.exec(sql); },
+    async exec(sql) {
+      const statements = sql.split(';').map(s => s.trim()).filter(Boolean);
+      for (const stmt of statements) {
+        await db.execute(stmt);
+      }
+    },
     async batch(statements) {
       const results = [];
-      const transaction = db.transaction((stmts) => {
-        for (const stmt of stmts) {
-          results.push(stmt.run());
+      for (const stmt of statements) {
+        if (typeof stmt.run === 'function') {
+          results.push(await stmt.run());
+        } else {
+          const rs = await db.execute(stmt);
+          results.push({ meta: { changes: rs.rowsAffected, last_row_id: Number(rs.lastInsertRowid) } });
         }
-      });
-      transaction(statements);
+      }
       return results;
     }
   }
@@ -68,19 +74,12 @@ const PLANS = [
 ];
 const REFERRAL_PCTS = [0.10, 0.05, 0.03];
 const PLAN_BONUSES = [0, 0.05, 0.15, 0.33];
-const WALLET_NETS = ["BNB", "TRC20", "BTC", "USDC"];
 const PHONE_CALLING_CODES = new Set(("1 20 211 212 213 216 218 220 221 222 223 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255 256 257 258 260 261 262 263 264 265 266 267 268 269 27 290 291 297 298 299 30 31 32 33 34 350 351 352 353 354 355 356 357 358 359 36 370 371 372 373 374 375 376 377 378 380 381 382 383 385 386 387 389 39 40 41 420 421 423 43 44 45 46 47 48 49 500 501 502 503 504 505 506 507 508 509 51 52 53 54 55 56 57 58 590 591 592 593 594 595 596 597 598 599 60 61 62 63 64 65 66 670 672 673 674 675 676 677 678 679 680 681 682 683 685 686 687 688 689 690 691 692 7 81 82 84 850 852 853 855 856 86 880 881 882 883 886 90 91 92 93 94 95 960 961 962 963 964 965 966 967 968 970 971 972 973 974 975 976 977 98 992 993 994 995 996 998").split(" "));
 
 function genSalt() {
   const a = new Uint8Array(16);
   crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
-}
-function walletAddressKey(net, address) {
-  const value = address.trim();
-  return ["BNB", "USDC"].includes(net) || (net === "BTC" && value.toLowerCase().startsWith("bc1"))
-    ? value.toLowerCase()
-    : value;
 }
 
 function normalizeEmail(value) {
@@ -110,29 +109,23 @@ function normalizePhone(value) {
   return phone;
 }
 
-async function emailDomainAcceptsMail(email) {
-  return true; // Bypass per ambiente Render
-}
-
 function makeToken() {
   const a = new Uint8Array(24);
   crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
+
 async function hash(pw, salt) {
   const data = new TextEncoder().encode(salt + "::" + pw);
   const buf = await crypto.subtle.digest("SHA-256", data);
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
+
 async function hashAdminSecret(secret, saltHex, iterations = 20000) {
   const salt = Uint8Array.from(saltHex.match(/.{2}/g), pair => parseInt(pair, 16));
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations, hash: "SHA-256" }, key, 256);
   return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-function isProjectOwner(request) {
-  return false;
 }
 
 async function sessionUser(request, env) {
@@ -146,6 +139,7 @@ async function sessionUser(request, env) {
   }
   return env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(s.user_id).first();
 }
+
 async function adminSessionUser(request, env) {
   const token = (request.headers.get("x-admin-token") || "").trim();
   if (!token) return null;
@@ -153,14 +147,9 @@ async function adminSessionUser(request, env) {
   if (!session) return null;
   return env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(session.user_id).first();
 }
-async function projectOwnerActor(request, env) {
-  return null;
-}
 
 async function adminActor(request, env) {
-  const operator = await adminSessionUser(request, env);
-  if (operator) return operator;
-  return await projectOwnerActor(request, env);
+  return await adminSessionUser(request, env);
 }
 
 async function accrue(env, userId) {
@@ -350,10 +339,8 @@ const workerHandler = {
         level INTEGER NOT NULL,
         amount REAL NOT NULL,
         created_at INTEGER NOT NULL,
-        migration_id TEXT,
         UNIQUE(event_id, level)
       );
-      CREATE INDEX IF NOT EXISTS referral_commissions_user_source ON referral_commissions(user_id, source_user_id);
       CREATE TABLE IF NOT EXISTS referral_first_deposits (
         source_user_id TEXT PRIMARY KEY,
         deposit_id INTEGER NOT NULL UNIQUE,
@@ -361,10 +348,6 @@ const workerHandler = {
       );
       CREATE INDEX IF NOT EXISTS users_referred_by ON users(referred_by);
       CREATE INDEX IF NOT EXISTS investments_user_active ON investments(user_id, active);
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS deposits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -372,8 +355,6 @@ const workerHandler = {
         net TEXT NOT NULL,
         date INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'approved',
-        reviewed_at INTEGER,
-        reviewed_by TEXT,
         tx_reference TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS withdrawals (
@@ -383,12 +364,8 @@ const workerHandler = {
         net TEXT NOT NULL,
         date INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'approved',
-        wallet_address TEXT NOT NULL DEFAULT '',
-        reviewed_at INTEGER,
-        reviewed_by TEXT
+        wallet_address TEXT NOT NULL DEFAULT ''
       );
-      CREATE INDEX IF NOT EXISTS deposits_status_date ON deposits(status, date);
-      CREATE INDEX IF NOT EXISTS withdrawals_status_date ON withdrawals(status, date);
       CREATE TABLE IF NOT EXISTS settings (
         user_id TEXT PRIMARY KEY,
         withdraw_wallets TEXT NOT NULL DEFAULT '{}',
@@ -408,14 +385,8 @@ const workerHandler = {
         user_id TEXT NOT NULL,
         expires_at INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS admin_login_attempts (
-        user_id TEXT PRIMARY KEY,
-        failures INTEGER NOT NULL DEFAULT 0,
-        locked_until INTEGER NOT NULL DEFAULT 0
-      );
     `);
     
-    // Auto-configurazione automatica per h9invest@gmail.com
     const adminEmail = "h9invest@gmail.com";
     let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
     let adminUserId;
@@ -440,44 +411,44 @@ const workerHandler = {
     await schemaPromise;
 
     const url = new URL(request.url);
-    const path = url.pathname;
+    const pathName = url.pathname;
     const method = request.method;
 
     try {
-      if (method === "POST" && path === "/api/register") return await register(request, env);
-      if (method === "POST" && path === "/api/login") return await login(request, env);
-      if (method === "POST" && path === "/api/verification/request") return await requestEmailVerification(request, env);
-      if (method === "POST" && path === "/api/verification/confirm") return await confirmEmailVerification(request, env);
-      if (method === "POST" && path === "/api/logout") return await logout(request, env);
-      if (method === "GET" && path === "/api/me") return await me(request, env);
-      if (method === "GET" && path === "/api/notifications") return await getNotifications(request, env);
-      if (method === "POST" && path === "/api/notifications/read") return await markNotificationsRead(request, env);
-      if (method === "POST" && path === "/api/deposit") return await deposit(request, env);
-      if (method === "POST" && path === "/api/invest") return await invest(request, env);
-      if (method === "POST" && path === "/api/withdraw") return await withdraw(request, env);
-      if (method === "POST" && path === "/api/security/confirm-otp") return await confirmSensitiveActionOtp(request, env);
-      if (method === "POST" && path === "/api/save-wallet") return await saveWallet(request, env);
-      if (method === "POST" && path === "/api/wallet-change-request") return await requestWalletChange(request, env);
-      if (method === "POST" && path === "/api/settings") return await updateSettings(request, env);
-      if (method === "POST" && path === "/api/change-password") return await changePassword(request, env);
-      if (method === "GET" && path === "/api/admin/transactions") return await adminTransactions(request, env);
-      if (method === "GET" && path === "/api/admin/users") return await adminUsers(request, env);
+      if (method === "POST" && pathName === "/api/register") return await register(request, env);
+      if (method === "POST" && pathName === "/api/login") return await login(request, env);
+      if (method === "POST" && pathName === "/api/verification/request") return await requestEmailVerification(request, env);
+      if (method === "POST" && pathName === "/api/verification/confirm") return await confirmEmailVerification(request, env);
+      if (method === "POST" && pathName === "/api/logout") return await logout(request, env);
+      if (method === "GET" && pathName === "/api/me") return await me(request, env);
+      if (method === "GET" && pathName === "/api/notifications") return await getNotifications(request, env);
+      if (method === "POST" && pathName === "/api/notifications/read") return await markNotificationsRead(request, env);
+      if (method === "POST" && pathName === "/api/deposit") return await deposit(request, env);
+      if (method === "POST" && pathName === "/api/invest") return await invest(request, env);
+      if (method === "POST" && pathName === "/api/withdraw") return await withdraw(request, env);
+      if (method === "POST" && pathName === "/api/security/confirm-otp") return await confirmSensitiveActionOtp(request, env);
+      if (method === "POST" && pathName === "/api/save-wallet") return await saveWallet(request, env);
+      if (method === "POST" && pathName === "/api/wallet-change-request") return await requestWalletChange(request, env);
+      if (method === "POST" && pathName === "/api/settings") return await updateSettings(request, env);
+      if (method === "POST" && pathName === "/api/change-password") return await changePassword(request, env);
+      if (method === "GET" && pathName === "/api/admin/transactions") return await adminTransactions(request, env);
+      if (method === "GET" && pathName === "/api/admin/users") return await adminUsers(request, env);
       
-      const adminUserMatch = path.match(/^\/api\/admin\/users\/([^/]+)$/);
+      const adminUserMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)$/);
       if (method === "GET" && adminUserMatch) return await adminUserDetails(request, env, adminUserMatch[1]);
       
-      const adminOtpMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/verification-otp$/);
+      const adminOtpMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/verification-otp$/);
       if (method === "POST" && adminOtpMatch) return await setUserVerificationOtp(request, env, adminOtpMatch[1]);
       
-      const adminBalanceMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/balance$/);
+      const adminBalanceMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/balance$/);
       if (method === "POST" && adminBalanceMatch) return await adminUpdateUserBalance(request, env, adminBalanceMatch[1]);
       
-      if (method === "POST" && path === "/api/admin/review") return await reviewTransaction(request, env);
-      if (method === "POST" && path === "/api/admin/credential") return await setAdminCredential(request, env);
-      if (method === "POST" && path === "/api/admin/logout") return await adminLogout(request, env);
+      if (method === "POST" && pathName === "/api/admin/review") return await reviewTransaction(request, env);
+      if (method === "POST" && pathName === "/api/admin/credential") return await setAdminCredential(request, env);
+      if (method === "POST" && pathName === "/api/admin/logout") return await adminLogout(request, env);
     } catch (e) {
       const status = Number.isInteger(e?.status) ? e.status : 500;
-      if (status >= 500) console.error(path, e);
+      if (status >= 500) console.error(pathName, e);
       return Response.json({ error: status === 500 ? "Errore del server." : e.message }, { status });
     }
     return new Response("Not found", { status: 404 });
@@ -495,7 +466,7 @@ async function register(request, env) {
   if (!email) return bad("Inserisci un indirizzo email valido.");
   if (password.length < 6) return Response.json({ error: "Password di almeno 6 caratteri." }, { status: 400 });
   const existing = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = lower(?) OR lower(username) = lower(?)").bind(email, username).first();
-  if (existing) return Response.json({ error: "Email/telefono o nome utente già registrato." }, { status: 400 });
+  if (existing) return Response.json({ error: "Email o nome utente già registrato." }, { status: 400 });
   let referredBy = null;
   if (invite) {
     const ref = await env.DB.prepare("SELECT id FROM users WHERE invite_code = ?").bind(invite).first();
@@ -561,7 +532,6 @@ async function setUserVerificationOtp(request, env, userId) {
   if (!actor) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
   const body = await request.json();
   const otp = typeof body.otp === "string" ? body.otp.trim() : "";
-  const notify = body.notify === true;
   if (!/^\d{6}$/.test(otp)) return bad("L’OTP deve contenere esattamente 6 cifre.");
   const user = await env.DB.prepare("SELECT id, email_verified FROM users WHERE id = ?").bind(userId).first();
   if (!user) return Response.json({ error: "Utente non trovato." }, { status: 404 });
@@ -586,7 +556,6 @@ async function setUserVerificationOtp(request, env, userId) {
     }
   }
 
-  // Invio della notifica con l'OTP direttamente nel pannello notifiche dell'utente
   await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
     .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
 
@@ -605,7 +574,7 @@ async function login(request, env) {
   let userPasswordValid = false;
   if (user) userPasswordValid = (await hash(pw, user.salt)) === user.password_hash;
   
-  const operator = await tryOperatorLogin(env, id, pw, !userPasswordValid);
+  const operator = await tryOperatorLogin(env, id, pw);
   if (operator?.token) return Response.json({ ok: true, mode: "operator", token: operator.token });
   
   if (userPasswordValid) {
@@ -613,9 +582,8 @@ async function login(request, env) {
     await env.DB.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)").bind(token, user.id, Date.now()).run();
     return Response.json({ ok: true, mode: "user", token });
   }
-  if (operator?.status === 429) return Response.json({ error: operator.error }, { status: 429 });
   if (!user) return Response.json({ error: "Account non trovato. Registrati prima di accedere." }, { status: 400 });
-  return Response.json({ error: operator?.error || "Password non corretta." }, { status: 400 });
+  return Response.json({ error: "Password non corretta." }, { status: 400 });
 }
 
 async function logout(request, env) {
@@ -799,7 +767,7 @@ async function adminUpdateUserBalance(request, env, userId) {
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare("UPDATE wallets SET deposit = ?, earnings = ? WHERE user_id = ?").bind(deposit, earnings, userId),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(userId, "Saldo wallet aggiornato", " Il tuo wallet è stato modificato dall'amministratore.", now)
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(userId, "Saldo wallet aggiornato", "Il tuo wallet è stato modificato dall'amministratore.", now)
   ]);
   return Response.json({ ok: true });
 }
@@ -827,7 +795,6 @@ async function reviewTransaction(request, env) {
       await env.DB.prepare("UPDATE deposits SET status = 'approved' WHERE id = ?").bind(id).run();
       await env.DB.prepare("UPDATE wallets SET deposit = deposit + ?, total_deposited = total_deposited + ? WHERE user_id = ?").bind(amount, amount, userId).run();
 
-      // Accredito commissioni referral SOLO al PRIMO deposito approvato
       const existingFirst = await env.DB.prepare("SELECT 1 FROM referral_first_deposits WHERE source_user_id = ?").bind(userId).first();
       if (!existingFirst) {
         const now = Date.now();
@@ -903,7 +870,7 @@ async function setAdminCredential(request, env) {
   return Response.json({ ok: true });
 }
 
-async function tryOperatorLogin(env, email, password, recordFailure = true) {
+async function tryOperatorLogin(env, email, password) {
   const credential = await env.DB.prepare("SELECT email, salt, password_hash, iterations, updated_by FROM admin_credentials WHERE id = 1").first();
   if (!credential?.email || email !== credential.email.toLowerCase()) return null;
   const suppliedHash = await hashAdminSecret(password, credential.salt, credential.iterations || 20000);
@@ -1087,12 +1054,27 @@ async function initDb() {
       user_id TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS admin_login_attempts (
-      user_id TEXT PRIMARY KEY,
-      failures INTEGER NOT NULL DEFAULT 0,
-      locked_until INTEGER NOT NULL DEFAULT 0
-    );
   `);
+  
+  const adminEmail = "h9invest@gmail.com";
+  let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
+  let adminUserId;
+  if (!adminUser) {
+    adminUserId = makeToken();
+    const salt = genSalt();
+    const ph = await hash(adminEmail, salt);
+    await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)")
+      .bind(adminUserId, "h9invest", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
+  } else {
+    adminUserId = adminUser.id;
+  }
+  
+  const saltAdmin = genSalt();
+  const iterations = 20000;
+  const passwordHashAdmin = await hashAdminSecret(adminEmail, saltAdmin, iterations);
+  await env.DB.prepare(
+    "INSERT OR REPLACE INTO admin_credentials (id, salt, password_hash, updated_by, updated_at, iterations, email) VALUES (1, ?, ?, ?, ?, ?, ?)"
+  ).bind(saltAdmin, passwordHashAdmin, adminUserId, Date.now(), iterations, adminEmail).run();
 }
 
 app.all('/api/*', async (req, res) => {
@@ -1118,6 +1100,6 @@ app.all('/api/*', async (req, res) => {
 
 initDb().then(() => {
   app.listen(PORT, () => {
-    console.log(`Server Cloud-Invest avviato correttamente sulla porta ${PORT}`);
+    console.log(`Server Cloud-Invest avviato con successo su Turso Cloud, porta ${PORT}`);
   });
 });
