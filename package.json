@@ -1,0 +1,14 @@
+{
+  "name": "cloud-invest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "You3invest Cloudflare Worker Application",
+  "main": "server.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.152.0"
+  }
+}
