@@ -613,6 +613,18 @@ async function getNotifications(request, env) {
 }
 
 async function markNotificationsRead(request, env) {
+  const user = await authed(request, env);
+  const body = await request.json();
+  const now = Date.now();
+  if (body.all === true) {
+    await env.DB.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").bind(now, user.id).run();
+  } else {
+    const id = Number(body.id);
+    if (!Number.isInteger(id) || id < 1) return bad("Notifica non valida.");
+    await env.DB.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL").bind(now, id, user.id).run();
+  }
+  return Response.json({ ok: true });
+}
   return Response.json({ ok: true });
 }
 
