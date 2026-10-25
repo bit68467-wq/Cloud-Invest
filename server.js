@@ -693,56 +693,11 @@ async function invest(request, env) {
   const wallet = await accrue(env, user.id);
   if (amount > wallet.deposit + 1e-9) return bad("Saldo deposito insufficiente.");
   const created = Date.now();
-
-  // Inserimento investimento
-  const invRes = await env.DB.prepare(
-    "INSERT INTO investments (user_id, amount, days, rate, created, credited, active) VALUES (?, ?, ?, ?, ?, 0, 1)"
-  ).bind(user.id, amount, plan.days, plan.rate, created).run();
-
-  const invId = invRes.meta.last_row_id;
-  const eventId = String(invId);
-
-  await env.DB.prepare("UPDATE investments SET commission_event_id = ? WHERE id = ?").bind(eventId, invId).run();
-
-  const statements = [
+  await env.DB.batch([
     env.DB.prepare("UPDATE wallets SET deposit = deposit - ? WHERE user_id = ?").bind(amount, user.id),
+    env.DB.prepare("INSERT INTO investments (user_id, amount, days, rate, created, credited, active) VALUES (?, ?, ?, ?, ?, 0, 1)").bind(user.id, amount, plan.days, plan.rate, created),
     env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Investimento avviato", amount.toFixed(2) + " USDT · Piano " + plan.days + " giorni.", created),
-  ];
-
-  // Accredito commissioni referral su 3 livelli
-  let currentUserId = user.referred_by;
-  for (let level = 0; level < REFERRAL_PCTS.length; level++) {
-    if (!currentUserId) break;
-    const uplineUser = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(currentUserId).first();
-    if (!uplineUser) break;
-
-    const pct = REFERRAL_PCTS[level];
-    const commAmount = amount * pct;
-    if (commAmount > 0) {
-      statements.push(
-        env.DB.prepare(
-          "INSERT INTO wallets (user_id, deposit, earnings, total_deposited, total_earned, total_withdrawn) VALUES (?, 0, ?, 0, ?, 0) " +
-          "ON CONFLICT(user_id) DO UPDATE SET earnings = earnings + ?, total_earned = total_earned + ?"
-        ).bind(uplineUser.id, commAmount, commAmount, commAmount, commAmount)
-      );
-      statements.push(
-        env.DB.prepare(
-          "INSERT OR IGNORE INTO referral_commissions (user_id, source_user_id, event_id, level, amount, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-        ).bind(uplineUser.id, user.id, eventId, level + 1, commAmount, created)
-      );
-      statements.push(
-        env.DB.prepare(
-          "INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)"
-        ).bind(uplineUser.id, "Commissione referral", `Accreditati ${commAmount.toFixed(2)} USDT di commissione referral (Livello ${level + 1}).`, created)
-      );
-    }
-
-    const nextParent = await env.DB.prepare("SELECT referred_by FROM users WHERE id = ?").bind(currentUserId).first();
-    currentUserId = nextParent ? nextParent.referred_by : null;
-  }
-
-  await env.DB.batch(statements);
-
+  ]);
   return Response.json({ ok: true, wallet: await accrue(env, user.id) });
 }
 
@@ -844,7 +799,7 @@ async function adminUpdateUserBalance(request, env, userId) {
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare("UPDATE wallets SET deposit = ?, earnings = ? WHERE user_id = ?").bind(deposit, earnings, userId),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(userId, "Saldo wallet aggiornato", "Il tuo wallet è stato modificato dall'amministratore.", now)
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(userId, "Saldo wallet aggiornato", " Il tuo wallet è stato modificato dall'amministratore.", now)
   ]);
   return Response.json({ ok: true });
 }
@@ -871,6 +826,43 @@ async function reviewTransaction(request, env) {
     if (action === "approve") {
       await env.DB.prepare("UPDATE deposits SET status = 'approved' WHERE id = ?").bind(id).run();
       await env.DB.prepare("UPDATE wallets SET deposit = deposit + ?, total_deposited = total_deposited + ? WHERE user_id = ?").bind(amount, amount, userId).run();
+
+      // Accredito commissioni referral SOLO al PRIMO deposito approvato
+      const existingFirst = await env.DB.prepare("SELECT 1 FROM referral_first_deposits WHERE source_user_id = ?").bind(userId).first();
+      if (!existingFirst) {
+        const now = Date.now();
+        await env.DB.prepare("INSERT OR IGNORE INTO referral_first_deposits (source_user_id, deposit_id, created_at) VALUES (?, ?, ?)").bind(userId, id, now).run();
+
+        const referredUser = await env.DB.prepare("SELECT referred_by FROM users WHERE id = ?").bind(userId).first();
+        let currentReferrerId = referredUser ? referredUser.referred_by : null;
+        const eventId = String(id);
+
+        for (let level = 0; level < REFERRAL_PCTS.length; level++) {
+          if (!currentReferrerId) break;
+          const uplineUser = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(currentReferrerId).first();
+          if (!uplineUser) break;
+
+          const pct = REFERRAL_PCTS[level];
+          const commAmount = amount * pct;
+          if (commAmount > 0) {
+            await env.DB.prepare(
+              "INSERT INTO wallets (user_id, deposit, earnings, total_deposited, total_earned, total_withdrawn) VALUES (?, 0, ?, 0, ?, 0) " +
+              "ON CONFLICT(user_id) DO UPDATE SET earnings = earnings + ?, total_earned = total_earned + ?"
+            ).bind(uplineUser.id, commAmount, commAmount, commAmount, commAmount).run();
+
+            await env.DB.prepare(
+              "INSERT OR IGNORE INTO referral_commissions (user_id, source_user_id, event_id, level, amount, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+            ).bind(uplineUser.id, userId, eventId, level + 1, commAmount, now).run();
+
+            await env.DB.prepare(
+              "INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)"
+            ).bind(uplineUser.id, "Commissione referral", `Accreditati ${commAmount.toFixed(2)} USDT di commissione referral (Livello ${level + 1}) sul primo deposito dell'utente.`, now).run();
+          }
+
+          const nextParent = await env.DB.prepare("SELECT referred_by FROM users WHERE id = ?").bind(currentReferrerId).first();
+          currentReferrerId = nextParent ? nextParent.referred_by : null;
+        }
+      }
     } else {
       await env.DB.prepare("UPDATE deposits SET status = 'rejected' WHERE id = ?").bind(id).run();
     }
@@ -1042,6 +1034,11 @@ async function initDb() {
       amount REAL NOT NULL,
       created_at INTEGER NOT NULL,
       UNIQUE(event_id, level)
+    );
+    CREATE TABLE IF NOT EXISTS referral_first_deposits (
+      source_user_id TEXT PRIMARY KEY,
+      deposit_id INTEGER NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS deposits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
