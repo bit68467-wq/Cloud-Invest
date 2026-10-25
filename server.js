@@ -625,6 +625,7 @@ async function markNotificationsRead(request, env) {
   }
   return Response.json({ ok: true });
 }
+
   return Response.json({ ok: true });
 }
 
