@@ -2,6 +2,7 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,8 +10,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configurazione database SQLite locale su Render
-const db = new Database('database.sqlite');
+// Configurazione database SQLite persistente su Render (supporta Render Persistent Disk o variabile d'ambiente)
+const dbPath = process.env.DATABASE_PATH || (fs.existsSync('/data') ? '/data/database.sqlite' : 'database.sqlite');
+const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
 // Adattatore D1/SQLite compatibile al 100% con la logica originale
@@ -691,11 +693,56 @@ async function invest(request, env) {
   const wallet = await accrue(env, user.id);
   if (amount > wallet.deposit + 1e-9) return bad("Saldo deposito insufficiente.");
   const created = Date.now();
-  await env.DB.batch([
+
+  // Inserimento investimento
+  const invRes = await env.DB.prepare(
+    "INSERT INTO investments (user_id, amount, days, rate, created, credited, active) VALUES (?, ?, ?, ?, ?, 0, 1)"
+  ).bind(user.id, amount, plan.days, plan.rate, created).run();
+
+  const invId = invRes.meta.last_row_id;
+  const eventId = String(invId);
+
+  await env.DB.prepare("UPDATE investments SET commission_event_id = ? WHERE id = ?").bind(eventId, invId).run();
+
+  const statements = [
     env.DB.prepare("UPDATE wallets SET deposit = deposit - ? WHERE user_id = ?").bind(amount, user.id),
-    env.DB.prepare("INSERT INTO investments (user_id, amount, days, rate, created, credited, active) VALUES (?, ?, ?, ?, ?, 0, 1)").bind(user.id, amount, plan.days, plan.rate, created),
     env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Investimento avviato", amount.toFixed(2) + " USDT · Piano " + plan.days + " giorni.", created),
-  ]);
+  ];
+
+  // Accredito commissioni referral su 3 livelli
+  let currentUserId = user.referred_by;
+  for (let level = 0; level < REFERRAL_PCTS.length; level++) {
+    if (!currentUserId) break;
+    const uplineUser = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(currentUserId).first();
+    if (!uplineUser) break;
+
+    const pct = REFERRAL_PCTS[level];
+    const commAmount = amount * pct;
+    if (commAmount > 0) {
+      statements.push(
+        env.DB.prepare(
+          "INSERT INTO wallets (user_id, deposit, earnings, total_deposited, total_earned, total_withdrawn) VALUES (?, 0, ?, 0, ?, 0) " +
+          "ON CONFLICT(user_id) DO UPDATE SET earnings = earnings + ?, total_earned = total_earned + ?"
+        ).bind(uplineUser.id, commAmount, commAmount, commAmount, commAmount)
+      );
+      statements.push(
+        env.DB.prepare(
+          "INSERT OR IGNORE INTO referral_commissions (user_id, source_user_id, event_id, level, amount, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(uplineUser.id, user.id, eventId, level + 1, commAmount, created)
+      );
+      statements.push(
+        env.DB.prepare(
+          "INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)"
+        ).bind(uplineUser.id, "Commissione referral", `Accreditati ${commAmount.toFixed(2)} USDT di commissione referral (Livello ${level + 1}).`, created)
+      );
+    }
+
+    const nextParent = await env.DB.prepare("SELECT referred_by FROM users WHERE id = ?").bind(currentUserId).first();
+    currentUserId = nextParent ? nextParent.referred_by : null;
+  }
+
+  await env.DB.batch(statements);
+
   return Response.json({ ok: true, wallet: await accrue(env, user.id) });
 }
 
@@ -983,7 +1030,18 @@ async function initDb() {
       rate REAL NOT NULL,
       created INTEGER NOT NULL,
       credited REAL NOT NULL DEFAULT 0,
-      active INTEGER NOT NULL DEFAULT 1
+      active INTEGER NOT NULL DEFAULT 1,
+      commission_event_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS referral_commissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      source_user_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      level INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(event_id, level)
     );
     CREATE TABLE IF NOT EXISTS deposits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
