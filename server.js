@@ -249,7 +249,7 @@ async function fullState(env, user, request) {
     notifications = !!s.notifications;
   }
   return {
-    user: { id: user.id, username: user.username, identifier: user.identifier, inviteCode: user.invite_code, referredBy: user.referred_by },
+    user: { id: user.id, username: user.username, identifier: user.identifier, inviteCode: user.invite_code, referredBy: user.referred_by, emailVerified: user.email_verified },
     wallet,
     investments,
     deposits,
@@ -278,7 +278,8 @@ const workerHandler = {
         salt TEXT NOT NULL,
         invite_code TEXT NOT NULL,
         referred_by TEXT,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        email_verified INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -370,7 +371,8 @@ const workerHandler = {
         date INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'approved',
         reviewed_at INTEGER,
-        reviewed_by TEXT
+        reviewed_by TEXT,
+        tx_reference TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS withdrawals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -390,34 +392,6 @@ const workerHandler = {
         withdraw_wallets TEXT NOT NULL DEFAULT '{}',
         notifications INTEGER NOT NULL DEFAULT 1
       );
-      CREATE TABLE IF NOT EXISTS withdrawal_wallets (
-        user_id TEXT NOT NULL,
-        net TEXT NOT NULL,
-        address TEXT NOT NULL,
-        address_key TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (user_id, net),
-        UNIQUE (net, address_key)
-      );
-      CREATE TABLE IF NOT EXISTS wallet_setup (
-        user_id TEXT PRIMARY KEY,
-        created_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS wallet_address_claims (
-        address_key TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS wallet_change_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        wallets_json TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        requested_at INTEGER NOT NULL,
-        reviewed_at INTEGER,
-        reviewed_by TEXT
-      );
-      CREATE INDEX IF NOT EXISTS wallet_change_requests_status_date ON wallet_change_requests(status, requested_at);
-      CREATE UNIQUE INDEX IF NOT EXISTS wallet_change_requests_one_pending ON wallet_change_requests(user_id) WHERE status = 'pending';
       CREATE TABLE IF NOT EXISTS admin_credentials (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         salt TEXT NOT NULL,
@@ -436,16 +410,6 @@ const workerHandler = {
         user_id TEXT PRIMARY KEY,
         failures INTEGER NOT NULL DEFAULT 0,
         locked_until INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS admin_balance_changes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        actor_id TEXT NOT NULL,
-        previous_deposit REAL NOT NULL,
-        new_deposit REAL NOT NULL,
-        previous_earnings REAL NOT NULL,
-        new_earnings REAL NOT NULL,
-        created_at INTEGER NOT NULL
       );
     `);
     
@@ -540,21 +504,92 @@ async function register(request, env) {
   const s = genSalt();
   const inviteCode = "H9-" + username.slice(0, 4).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
   const ph = await hash(password, s);
-  await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, referred_by, created_at) VALUES (?,?,?,?,?,?,?,?)")
+  await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, referred_by, created_at, email_verified) VALUES (?,?,?,?,?,?,?,?,0)")
     .bind(id, username, email, ph, s, inviteCode, referredBy, Date.now()).run();
   return Response.json({ ok: true, email, username });
 }
 
 async function requestEmailVerification(request, env) {
-  return Response.json({ ok: true });
+  const body = await request.json();
+  const rawAccount = typeof body.account === "string" ? body.account.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  const account = normalizeEmail(rawAccount) || rawAccount.toLowerCase();
+  if (!account || !password) return bad("Inserisci account e password.");
+  const user = await env.DB.prepare("SELECT * FROM users WHERE lower(identifier) = ? OR lower(username) = ?").bind(account, account).first();
+  if (!user || (await hash(password, user.salt)) !== user.password_hash) return bad("Account o password non corretti.");
+  if (user.email_verified) return bad("Questo indirizzo email è già verificato.");
+
+  const now = Date.now();
+  await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_attempts, verified_at) VALUES (?, ?, 0, NULL) ON CONFLICT(user_id) DO UPDATE SET requested_at = excluded.requested_at, verified_at = NULL").bind(user.id, now).run();
+  return Response.json({ ok: true, email: user.identifier, username: user.username, userId: user.id, requestedAt: now });
 }
 
 async function confirmEmailVerification(request, env) {
-  return Response.json({ ok: true });
+  const body = await request.json();
+  const email = normalizeEmail(body.email);
+  const password = typeof body.password === "string" ? body.password : "";
+  const otp = typeof body.otp === "string" ? body.otp.trim() : "";
+  if (!email || !password || !/^\d{6}$/.test(otp)) return bad("Inserisci email, password e OTP di 6 cifre.");
+  const user = await env.DB.prepare("SELECT * FROM users WHERE lower(identifier) = ?").bind(email).first();
+  if (!user || (await hash(password, user.salt)) !== user.password_hash) return bad("Email o password non corrette.");
+  if (user.email_verified) return bad("Questo indirizzo email è già verificato.");
+  
+  const requestRow = await env.DB.prepare("SELECT * FROM email_verification_requests WHERE user_id = ?").bind(user.id).first();
+  if (!requestRow?.otp_hash || !requestRow.otp_salt || !requestRow.otp_expires_at || requestRow.otp_expires_at < Date.now()) return bad("OTP assente o scaduto. Richiedi un nuovo codice all'amministratore.");
+  if (requestRow.otp_attempts >= 5) return bad("Troppi tentativi.");
+  
+  if (await hash(otp, requestRow.otp_salt) !== requestRow.otp_hash) {
+    await env.DB.prepare("UPDATE email_verification_requests SET otp_attempts = otp_attempts + 1 WHERE user_id = ?").bind(user.id).run();
+    return bad("OTP non corretto.");
+  }
+  
+  const now = Date.now();
+  const token = makeToken();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").bind(user.id),
+    env.DB.prepare("UPDATE email_verification_requests SET verified_at = ?, otp_hash = NULL, otp_salt = NULL WHERE user_id = ?").bind(now, user.id),
+    env.DB.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)").bind(token, user.id, now),
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'account', ?, ?, ?)").bind(user.id, "Email verificata", "La verifica del tuo account è stata completata con successo.", now),
+  ]);
+  return Response.json({ ok: true, mode: "user", token });
 }
 
 async function setUserVerificationOtp(request, env, userId) {
-  return Response.json({ ok: true });
+  const actor = await adminActor(request, env);
+  if (!actor) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  const body = await request.json();
+  const otp = typeof body.otp === "string" ? body.otp.trim() : "";
+  const notify = body.notify === true;
+  if (!/^\d{6}$/.test(otp)) return bad("L’OTP deve contenere esattamente 6 cifre.");
+  const user = await env.DB.prepare("SELECT id, email_verified FROM users WHERE id = ?").bind(userId).first();
+  if (!user) return Response.json({ error: "Utente non trovato." }, { status: 404 });
+  const expiresAt = Date.now() + 15 * 60 * 1000;
+  const salt = genSalt();
+  const otpHash = await hash(otp, salt);
+
+  if (user.email_verified) {
+    await env.DB.prepare(
+      "INSERT INTO sensitive_action_verifications (user_id, action, payload_json, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) " +
+      "VALUES (?, 'withdrawal', '{}', ?, ?, ?, ?, 0, ?, ?) " +
+      "ON CONFLICT(user_id) DO UPDATE SET otp_hash = excluded.otp_hash, otp_salt = excluded.otp_salt, otp_expires_at = excluded.otp_expires_at, otp_attempts = 0"
+    ).bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
+  } else {
+    const row = await env.DB.prepare("SELECT user_id FROM email_verification_requests WHERE user_id = ?").bind(userId).first();
+    if (!row) {
+      await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?)")
+        .bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
+    } else {
+      await env.DB.prepare("UPDATE email_verification_requests SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ?")
+        .bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
+    }
+  }
+
+  if (notify) {
+    await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
+      .bind(userId, "Codice OTP verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
+  }
+
+  return Response.json({ ok: true, expiresAt });
 }
 
 async function login(request, env) {
@@ -664,7 +699,14 @@ async function invest(request, env) {
 }
 
 async function requestSensitiveActionOtp(env, user, action, payload) {
-  return Response.json({ ok: true, otpRequired: false });
+  const now = Date.now();
+  const payloadJson = JSON.stringify(payload);
+  await env.DB.prepare(
+    "INSERT INTO sensitive_action_verifications (user_id, action, payload_json, requested_at, otp_attempts) VALUES (?, ?, ?, ?, 0) " +
+    "ON CONFLICT(user_id) DO UPDATE SET action = excluded.action, payload_json = excluded.payload_json, requested_at = excluded.requested_at, otp_hash = NULL, otp_salt = NULL, otp_expires_at = NULL, otp_attempts = 0, consumed_at = NULL"
+  ).bind(user.id, action, payloadJson, now).run();
+  
+  return Response.json({ ok: true, otpRequired: true, action, payload });
 }
 
 async function validateWithdrawal(env, user, body) {
@@ -674,25 +716,46 @@ async function validateWithdrawal(env, user, body) {
   if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
   const wallet = await accrue(env, user.id);
   if (amount > wallet.earnings + 1e-9) return bad("Saldo guadagni non sufficiente.");
-  return { amount, net, address: "wallet-default" };
+  return { amount, net, address: body.address || "wallet-default" };
 }
 
 async function withdraw(request, env) {
   const user = await authed(request, env);
+  if (!user.email_verified) {
+    return Response.json({ error: "Verifica l’email prima di richiedere un prelievo.", verificationRequired: true, email: user.identifier }, { status: 403 });
+  }
   const body = await request.json();
   const prepared = await validateWithdrawal(env, user, body);
   if (prepared instanceof Response) return prepared;
-  const created = Date.now();
-  await env.DB.batch([
-    env.DB.prepare("UPDATE wallets SET earnings = earnings - ? WHERE user_id = ?").bind(prepared.amount, user.id),
-    env.DB.prepare("INSERT INTO withdrawals (user_id, amount, net, date, status, wallet_address) VALUES (?, ?, ?, ?, 'pending', ?)")
-      .bind(user.id, prepared.amount, prepared.net, created, prepared.address),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Richiesta di prelievo inviata", prepared.amount.toFixed(2) + " USDT · " + prepared.net + " · In attesa di verifica.", created),
-  ]);
-  return Response.json({ ok: true, status: "pending" });
+  return await requestSensitiveActionOtp(env, user, "withdrawal", prepared);
 }
 
 async function confirmSensitiveActionOtp(request, env) {
+  const user = await authed(request, env);
+  const otp = String((await request.json()).otp || "").trim();
+  if (!/^\d{6}$/.test(otp)) return bad("Inserisci un OTP di 6 cifre.");
+  const challenge = await env.DB.prepare("SELECT * FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(user.id).first();
+  if (!challenge?.otp_hash || !challenge.otp_salt || !challenge.otp_expires_at || challenge.otp_expires_at < Date.now()) return bad("OTP assente o scaduto. Chiedi il codice all'amministratore.");
+  if (challenge.otp_attempts >= 5) return bad("Troppi tentativi.");
+  if (await hash(otp, challenge.otp_salt) !== challenge.otp_hash) {
+    await env.DB.prepare("UPDATE sensitive_action_verifications SET otp_attempts = otp_attempts + 1 WHERE user_id = ?").bind(user.id).run();
+    return bad("OTP non corretto.");
+  }
+  let payload;
+  try { payload = JSON.parse(challenge.payload_json); } catch { return bad("Richiesta non valida."); }
+  
+  await env.DB.prepare("UPDATE sensitive_action_verifications SET consumed_at = ? WHERE user_id = ?").bind(Date.now(), user.id).run();
+  
+  if (challenge.action === "withdrawal") {
+    const created = Date.now();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE wallets SET earnings = earnings - ? WHERE user_id = ?").bind(payload.amount, user.id),
+      env.DB.prepare("INSERT INTO withdrawals (user_id, amount, net, date, status, wallet_address) VALUES (?, ?, ?, ?, 'pending', ?)")
+        .bind(user.id, payload.amount, payload.net, created, payload.address),
+      env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Richiesta di prelievo inviata", payload.amount.toFixed(2) + " USDT · " + payload.net + " · In attesa di verifica.", created),
+    ]);
+    return Response.json({ ok: true, status: "pending" });
+  }
   return Response.json({ ok: true });
 }
 
@@ -701,7 +764,9 @@ async function adminTransactions(request, env) {
   if (!user) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
-  return Response.json({ deposits, withdrawals, walletChanges: [], emailVerifications: [], sensitiveActionVerifications: [], operator: user.username });
+  const emailVerifications = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM email_verification_requests r JOIN users u ON u.id = r.user_id WHERE r.verified_at IS NULL").all()).results;
+  const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
+  return Response.json({ deposits, withdrawals, walletChanges: [], emailVerifications, sensitiveActionVerifications, operator: user.username });
 }
 
 async function adminUsers(request, env) {
@@ -717,7 +782,9 @@ async function adminUserDetails(request, env, userId) {
   const target = await env.DB.prepare("SELECT id, username, identifier, created_at, referred_by, email_verified FROM users WHERE id = ?").bind(userId).first();
   const wallet = await accrue(env, target.id);
   const investments = (await env.DB.prepare("SELECT id, amount, days, rate, created, credited, active FROM investments WHERE user_id = ?").bind(target.id).all()).results;
-  return Response.json({ user: target, wallet, investments });
+  const verificationRequest = await env.DB.prepare("SELECT requested_at, otp_expires_at, verified_at FROM email_verification_requests WHERE user_id = ?").bind(target.id).first();
+  const actionVerification = await env.DB.prepare("SELECT action, requested_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(target.id).first();
+  return Response.json({ user: target, wallet, investments, verificationRequest, actionVerification });
 }
 
 async function adminUpdateUserBalance(request, env, userId) {
@@ -777,7 +844,6 @@ async function reviewTransaction(request, env) {
     return bad("Tipo di transazione non valido.");
   }
 
-  // Creazione della notifica per l'utente (accettato o rifiutato)
   if (userId) {
     const now = Date.now();
     const statusLabel = action === "approve" ? "accettato" : "rifiutato";
@@ -825,7 +891,10 @@ async function saveWallet(request, env) {
 }
 
 async function requestWalletChange(request, env) {
-  return Response.json({ ok: true });
+  const user = await authed(request, env);
+  if (!user.email_verified) return Response.json({ error: "Verifica l’email prima di modificare i wallet.", verificationRequired: true, email: user.identifier }, { status: 403 });
+  const body = await request.json();
+  return await requestSensitiveActionOtp(env, user, "wallet_change", body.wallets || {});
 }
 
 async function updateSettings(request, env) {
@@ -866,12 +935,36 @@ async function initDb() {
       invite_code TEXT NOT NULL,
       referred_by TEXT,
       created_at INTEGER NOT NULL,
-      email_verified INTEGER NOT NULL DEFAULT 1
+      email_verified INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS email_verification_requests (
+      user_id TEXT PRIMARY KEY,
+      requested_at INTEGER NOT NULL,
+      otp_hash TEXT,
+      otp_salt TEXT,
+      otp_expires_at INTEGER,
+      otp_attempts INTEGER NOT NULL DEFAULT 0,
+      issued_at INTEGER,
+      issued_by TEXT,
+      verified_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS sensitive_action_verifications (
+      user_id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      requested_at INTEGER NOT NULL,
+      otp_hash TEXT,
+      otp_salt TEXT,
+      otp_expires_at INTEGER,
+      otp_attempts INTEGER NOT NULL DEFAULT 0,
+      issued_at INTEGER,
+      issued_by TEXT,
+      consumed_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS wallets (
       user_id TEXT PRIMARY KEY,
