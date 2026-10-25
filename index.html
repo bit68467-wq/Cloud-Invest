@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#090c0a">
+  <title>You3invest</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- ==================== A U T H (landing) ==================== -->
+    <div class="auth" id="authScreen">
+      <div class="auth-inner">
+        <div class="auth-brand">
+          <span class="logo">Y3</span>
+          <div>
+            <div class="brand-name">You3invest</div>
+            <div class="brand-sub">Investi con visione.</div>
+          </div>
+        </div>
+
+        <div class="auth-tabs">
+          <button class="auth-tab active" id="tabLogin">Accedi</button>
+          <button class="auth-tab" id="tabRegister">Registrati</button>
+        </div>
+
+        <form class="auth-form" id="loginForm" autocomplete="off">
+          <label class="field-label" for="loginId">Email, nome utente o telefono</label>
+          <input class="auth-input" id="loginId" autocomplete="username" placeholder="nome@email.com" required>
+          <label class="field-label" for="loginPass">Password</label>
+          <input class="auth-input" type="password" id="loginPass" autocomplete="current-password" placeholder="••••••••" required>
+          <p class="auth-err" id="loginErr"></p>
+          <button type="submit" class="btn-primary">Accedi</button>
+        </form>
+
+        <form class="auth-form" id="registerForm" autocomplete="off" hidden>
+          <label class="field-label" for="regId">Indirizzo email</label>
+          <input class="auth-input" id="regId" type="email" autocomplete="email" placeholder="nome@email.com" required>
+          <label class="field-label">Nome utente (user)</label>
+          <input class="auth-input" id="regUser" placeholder="es. marco90" required>
+          <div class="two">
+<div>
+                  <label class="field-label" for="regPass">Password</label>
+                  <input class="auth-input" type="password" id="regPass" autocomplete="new-password" placeholder="••••••••" required>
+                </div>
+                <div>
+                  <label class="field-label" for="regPass2">Conferma</label>
+                  <input class="auth-input" type="password" id="regPass2" autocomplete="new-password" placeholder="••••••••" required>
+                </div>
+          </div>
+          <label class="field-label">Codice invito <em>(opzionale)</em></label>
+          <input class="auth-input" id="regInvite" placeholder="Codice invito (opzionale)">
+          <p class="auth-err" id="regErr"></p>
+          <button type="submit" class="btn-primary">Registrati</button>
+        </form>
+
+        <section id="verificationPanel" hidden>
+          <p class="otp-text">Per prelievi e modifiche wallet serve un OTP inviato all’email verificata. Inserisci le credenziali e richiedi il codice.</p>
+          <form class="auth-form" id="verificationRequestForm">
+            <label class="field-label" for="verifyAccount">Account attuale</label>
+            <input class="auth-input" id="verifyAccount" autocomplete="username" placeholder="Email, nome utente o telefono" required>
+            <label class="field-label" for="verifyEmail">Email da verificare</label>
+            <input class="auth-input" id="verifyEmail" type="email" autocomplete="email" required>
+            <label class="field-label" for="verifyPassword">Password</label>
+            <input class="auth-input" id="verifyPassword" type="password" autocomplete="current-password" required>
+            <p class="auth-err" id="verificationRequestErr"></p>
+            <button type="submit" class="btn-primary">Richiedi verifica</button>
+          </form>
+          <a class="btn-primary mail-link" id="requestEmailLink" hidden>Apri email precompilata</a>
+          <p class="hint" id="verificationRequestMsg" role="status"></p>
+          <form class="auth-form" id="verificationConfirmForm">
+            <label class="field-label" for="verifyOtp">Codice OTP</label>
+            <input class="auth-input otp-input" id="verifyOtp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required>
+            <p class="auth-err" id="verificationConfirmErr"></p>
+            <button type="submit" class="btn-primary">Verifica email</button>
+          </form>
+          <button class="btn-mini auth-back" id="verificationBack" type="button">Torna all’accesso</button>
+        </section>
+
+        <p class="auth-msg" id="authMsg" hidden></p>
+      </div>
+    </div>
+
+    <div class="appbody" id="operatorScreen" hidden>
+      <header class="appbar">
+        <div class="brand">
+          <span class="logo">Y3</span>
+          <div><span class="brand-name">Operatore</span><span class="brand-sub">Richieste da verificare</span></div>
+        </div>
+        <div class="appbar-right">
+          <button class="btn-mini" id="operatorUsersToggle" type="button">Utenti</button>
+          <button class="btn-mini" id="operatorLogoutBtn" type="button">Esci</button>
+        </div>
+      </header>
+      <main class="screen">
+        <section id="operatorUsersSection" hidden>
+          <h2 class="section-title">Utenti registrati</h2>
+          <div id="operatorUsersList"></div>
+        </section>
+        <h2 class="section-title">Richieste da verificare</h2>
+        <div id="operatorQueue"></div>
+      </main>
+    </div>
+
+    <!-- ==================== A P P ==================== -->
+    <div class="appbody" id="appBody" hidden>
+      <header class="appbar">
+        <div class="brand">
+          <span class="logo">Y3</span>
+          <div>
+            <span class="brand-name">You3invest</span>
+            <span class="brand-sub">Ciao <span id="barName">…</span></span>
+          </div>
+        </div>
+        <div class="appbar-right">
+          <div class="notification-wrap">
+            <button class="notification-bell" id="notificationBell" type="button" aria-label="Notifiche" aria-expanded="false" aria-controls="notificationPanel">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+              <span class="notification-count" id="notificationCount" hidden></span>
+            </button>
+            <section class="notification-panel" id="notificationPanel" aria-label="Notifiche recenti" hidden>
+              <div class="notification-head"><b>Notifiche</b><button class="notification-clear" id="notificationClear" type="button">Segna tutte lette</button></div>
+              <div class="notification-list" id="notificationList"><p class="hint">Nessuna notifica.</p></div>
+            </section>
+          </div>
+          <span class="user-pill"><img id="appbarAvatar" src="" alt=""><span id="barUser">…</span></span>
+        </div>
+      </header>
+
+      <main class="screen">
+        <section class="card-block otp-pending" id="otpPendingCard" hidden aria-live="polite">
+          <h2 class="block-title" id="otpPendingTitle">Richiesta OTP in attesa</h2>
+          <p id="otpPendingMessage"></p>
+          <p class="hint" id="otpPendingDetails"></p>
+          <div class="otp-pending-actions">
+            <a class="btn-primary mail-link" id="otpPendingEmail">Invia email e attendi il codice OTP</a>
+            <button class="btn-primary" id="otpPendingEnter" type="button" hidden>Inserisci codice OTP</button>
+          </div>
+        </section>
+
+        <!-- ==================== H O M E ==================== -->
+        <section class="view active" id="view-home">
+          <div class="hero">
+            <p class="hello">Ciao, <b id="helloName">investitore</b></p>
+            <h1>Matura un <span>guadagno</span> ogni giorno.</h1>
+          </div>
+
+          <div class="balance-card">
+            <div class="bc-head">
+              <span>Saldo deposito</span>
+              <span class="bc-tag">Solo investimenti</span>
+            </div>
+            <div class="bc-amount" id="homeDeposit">$0.00</div>
+            <div class="bc-divider">
+              <div>
+                <span>Saldo guadagni</span>
+                <b class="green" id="homeEarnings">$0.00</b>
+                <small>prelevabile</small>
+              </div>
+            </div>
+          </div>
+
+          <button class="mini-card" id="homeDepositToggle" type="button" aria-controls="homeDepositPanel" aria-expanded="false">
+            <span class="mc-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 18v3h14v-3"/></svg></span>
+            <div><b>Deposita USDT</b><small>Invia una richiesta di deposito</small></div>
+            <span class="mc-arrow"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+          <div class="card-block" id="homeDepositPanel" hidden>
+            <h3 class="block-title">Deposita USDT</h3>
+            <label class="field-label">Rete del deposito</label>
+            <div class="nets" id="netList"></div>
+            <label class="field-label" for="depAmount">Importo del deposito (USDT) · minimo 50</label>
+            <div class="amount-field">
+              <input type="number" id="depAmount" min="50" step="0.01" value="100" placeholder="0">
+              <span class="unit">USDT</span>
+            </div>
+            <div class="dep-addr">
+              <span>Indirizzo di deposito <b id="depNetName">—</b></span>
+              <code id="depAddr">—</code>
+            </div>
+            <label class="field-label" for="depTx">ID / hash della transazione</label>
+            <input class="auth-input" id="depTx" placeholder="Incolla il riferimento della transazione">
+            <button class="btn-primary" id="depositBtn" type="button"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 18v3h14v-3"/></svg> Invia per verifica</button>
+            <p class="hint">Il deposito entra nel saldo solo dopo il controllo manuale dell’operatore.</p>
+          </div>
+          <button class="mini-card" data-goto="invest">
+            <span class="mc-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-4 3 2 6-7"/></svg></span>
+            <div><b>Avvia un investimento</b><small>Scegli un piano e consulta i rendimenti</small></div>
+            <span class="mc-arrow"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+          <button class="mini-card" data-goto="withdraw">
+            <span class="mc-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></span>
+            <div><b>Preleva guadagni</b><small>Prelievo dal saldo guadagni</small></div>
+            <span class="mc-arrow"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+
+          <h2 class="section-title">Riepilogo investimenti</h2>
+          <div class="home-stats">
+            <div class="stat"><span>Investito attivo</span><b id="homeActiveMoney">$0</b></div>
+            <div class="stat"><span>Posizioni attive</span><b id="homeActiveCount">0</b></div>
+            <div class="stat"><span>Guadagno totale</span><b class="green" id="homeEarned">$0</b></div>
+          </div>
+
+          <h2 class="section-title">Piani di investimento</h2>
+          <div class="plan-list" id="homePlanList"></div>
+        </section>
+
+        <!-- ==================== I N V E S T ==================== -->
+        <section class="view" id="view-invest">
+          <div class="page-head">
+            <h1>Investi</h1>
+            <p>Scegli un piano e consulta i rendimenti.</p>
+          </div>
+
+          <div class="card-block">
+            <h3 class="block-title">Scegli il piano</h3>
+            <div class="plans" id="plans"></div>
+            <label class="field-label" id="investAmountLabel">Importo da investire (USDT)</label>
+            <div class="amount-field">
+              <input type="number" id="amount" min="50" max="50" step="0.01" value="50" placeholder="0">
+              <span class="unit">USDT</span>
+            </div>
+            <div class="calc-grid">
+              <div class="stat"><span>Rendimento giornaliero</span><b id="outDaily">$0.00</b></div>
+              <div class="stat"><span>Rendimento totale</span><b class="accent" id="outTotal">$0.00</b></div>
+              <div class="stat wide"><span>Totale a scadenza</span><b id="outFinal">$0.00</b></div>
+            </div>
+            <button class="btn-primary" id="buyBtn"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15 8.5c-.7-.6-1.6-.9-2.8-.9-1.5 0-2.5.8-2.5 1.9 0 3 5.8 1.2 5.8 4.4 0 1.2-1.1 2.1-2.8 2.1-1.2 0-2.2-.4-3-1.1M12 6v12"/></svg> Acquista piano</button>
+            <p class="hint">Il costo è detratto dal <b>saldo deposito</b>. I guadagni vanno nel <b>saldo guadagni</b> (prelevabile).</p>
+          </div>
+        </section>
+
+        <!-- ==================== W I T H D R A W ==================== -->
+        <section class="view" id="view-withdraw">
+          <div class="page-head">
+            <h1>Preleva guadagni</h1>
+            <p>Disponibile dal saldo guadagni.</p>
+          </div>
+
+          <div class="balance-card compact">
+            <div class="bc-head">
+              <span>Saldo guadagni disponibile</span>
+              <span class="bc-tag">prelevabile</span>
+            </div>
+            <div class="bc-amount green" id="wdAvailable">$0.00</div>
+          </div>
+
+          <div class="card-block">
+            <label class="field-label">Rete di prelievo</label>
+            <div class="nets" id="wdNets"></div>
+            <label class="field-label">Importo da prelevare (USDT) · minimo 50</label>
+            <div class="amount-field">
+              <input type="number" id="wdAmount" min="50" step="0.01" value="0" placeholder="0">
+              <span class="unit">USDT</span>
+            </div>
+            <button class="btn-primary" id="wdAll">Max</button>
+            <div class="dep-addr" id="wdAddressBox">
+              <span>Indirizzo di prelievo <b id="wdNetName">—</b></span>
+              <code id="wdAddress">Seleziona una rete</code>
+            </div>
+            <button class="btn-primary" id="wdBtn"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg> Richiedi prelievo</button>
+            <p class="hint" id="wdMsg"></p>
+          </div>
+
+          <h2 class="section-title" id="wdHistoryTitle" hidden>Ultimi prelievi</h2>
+          <div id="wdHistory"></div>
+        </section>
+
+        <!-- ==================== M Y ==================== -->
+        <section class="view" id="view-my">
+          <div class="page-head">
+            <h1>I miei investimenti</h1>
+            <p>Posizioni attive e storiche.</p>
+          </div>
+
+          <div class="active-sum" id="activeSummary"></div>
+          <div id="investList"></div>
+          <div class="empty" id="investEmpty" hidden>
+            <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-4 3 2 6-7"/></svg>
+            <p>Nessuna posizione attiva</p>
+            <button class="btn-primary" data-goto="invest">Inizia a investire</button>
+          </div>
+
+          <h2 class="section-title" id="historyTitle" hidden>Conclusi</h2>
+          <div id="historyList"></div>
+        </section>
+
+        <!-- ==================== T E A M ==================== -->
+        <section class="view" id="view-team">
+          <div class="page-head">
+            <h1>Il mio team</h1>
+            <p>Il livello cresce con membri che hanno un deposito approvato e almeno un investimento.</p>
+          </div>
+
+          <div class="team-sum" id="teamSummary"></div>
+
+          <div class="link-card">
+            <span class="link-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.1 11 22l-9-9V2h11l8 8a2 2 0 0 1-.4 3.1Z"/><circle cx="7.5" cy="7.5" r="1"/></svg></span>
+            <div>
+              <b>Il tuo codice invito</b>
+              <small>Commissione una tantum sul primo deposito approvato di ogni invitato.</small>
+            </div>
+            <button class="btn-mini" id="teamCopyLink">Copia</button>
+          </div>
+
+          <h2 class="section-title">Commissioni per livello team</h2>
+          <div class="levels" id="teamLevels"></div>
+
+          <button class="section-title team-members-toggle" id="teamMembersToggle" type="button" aria-expanded="false" aria-controls="teamList">
+            <span>Membri del team <span class="count" id="teamCount"></span></span>
+            <svg class="team-toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+          </button>
+          <div id="teamList" hidden></div>
+        </section>
+
+        <!-- ==================== P R O F I L E ==================== -->
+        <section class="view" id="view-profile">
+          <div class="profile-card">
+            <img class="avatar-lg" id="profileAvatar" src="" alt="">
+            <div>
+              <h2 id="profileName">—</h2>
+              <p class="profile-tag" id="profileTag">Investitore</p>
+              <p class="profile-id" id="profileId"></p>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat">Guadagno totale<span id="statEarned">$0</span></div>
+            <div class="stat">Prelevato<span id="statWd">$0</span></div>
+            <div class="stat">Saldo deposito<span id="statDep">$0</span></div>
+            <div class="stat">Referral<span id="statReferrals">0</span></div>
+          </div>
+
+          <button class="mini-card" data-goto="withdraw">
+            <span class="mc-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></span>
+            <div><b>Preleva guadagni</b><small>Dal saldo guadagni prelevabile</small></div>
+            <span class="mc-arrow"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+
+          <section class="operator-gate" id="adminAccessSection" hidden>
+            <h2 class="section-title">Credenziali operatore</h2>
+            <form id="adminCredentialSetup">
+              <label class="field-label" for="adminCredentialEmail">Email operatore</label>
+              <input class="auth-input" id="adminCredentialEmail" type="email" autocomplete="email" maxlength="254" placeholder="operatore@email.com" required>
+              <label class="field-label" for="adminNewSecret">Password operatore</label>
+              <input class="auth-input" id="adminNewSecret" type="password" autocomplete="new-password" minlength="12" maxlength="128" placeholder="Almeno 12 caratteri" required>
+              <button class="btn-primary" id="adminCredentialBtn" type="submit">Salva credenziali</button>
+            </form>
+            <p class="panel-msg" id="adminAuthMsg"></p>
+          </section>
+          <section id="ownerRequestSection" hidden>
+            <h2 class="section-title">Richieste da verificare</h2>
+            <div id="ownerQueue"></div>
+            <button class="btn-mini" id="ownerUsersToggle" type="button">Utenti registrati</button>
+            <div id="ownerUsersSection" hidden>
+              <div id="ownerUsersList"></div>
+            </div>
+          </section>
+
+          <h2 class="section-title">Gestione account</h2>
+          <div class="menu">
+            <div class="menu-row acc-row" data-panel="walletPanel">
+              <span class="menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18m-5 5h2"/></svg></span>
+              <div class="acc-text"><b>Wallet di prelievo</b><small id="walletStatus">Nessun indirizzo salvato</small></div>
+              <span class="mc-arrow" id="walletArrow"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+            </div>
+            <div class="panel" id="walletPanel" hidden></div>
+
+            <div class="menu-row acc-row" data-panel="pwPanel">
+              <span class="menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3m-4 4v3"/></svg></span><div class="acc-text"><b>Modifica password</b><small>Cambia la password dell'account</small></div>
+              <span class="mc-arrow" id="pwArrow"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+            </div>
+            <div class="panel" id="pwPanel" hidden>
+              <label class="field-label">Password attuale</label>
+              <input class="auth-input" type="password" id="pwCur" autocomplete="current-password" placeholder="••••••••">
+              <label class="field-label">Nuova password</label>
+              <input class="auth-input" type="password" id="pwNew" autocomplete="new-password" placeholder="••••••••">
+              <label class="field-label">Conferma nuova password</label>
+              <input class="auth-input" type="password" id="pwNew2" autocomplete="new-password" placeholder="••••••••">
+              <p class="panel-msg" id="pwMsg"></p>
+              <button class="btn-primary" id="pwSave">Aggiorna password</button>
+            </div>
+
+            <div class="menu-row">
+              <span class="menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12h4"/></svg></span><div class="acc-text"><b>Notifiche</b><small>Richieste, esiti e accrediti del wallet</small></div>
+              <button class="switch" id="notifSwitch" role="switch" aria-checked="true"><i></i></button>
+            </div>
+
+            <div class="menu-row acc-row" data-panel="histPanel">
+              <span class="menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 14h4"/></svg></span><div class="acc-text"><b>Storico movimenti</b><small>Depositi e prelievi</small></div>
+              <span class="mc-arrow" id="histStat"><svg class="ui-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
+            </div>
+            <div class="panel" id="histPanel" hidden></div>
+
+            <div class="menu-row" id="logoutBtn"><span class="menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5m5 5H3m9-9h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg></span> Esci dall'account</div>
+          </div>
+
+          <p class="disclaimer">Piattaforma demo. Gli investimenti comportano rischi: investi solo ciò che puoi permetterti di perdere. Saldo guadagni prelevabile, saldo deposito utilizzabile solo per investimenti.</p>
+        </section>
+
+      </main>
+
+      <!-- Bottom navigation -->
+      <nav class="bottomnav">
+        <button class="nav-item active" data-goto="home">
+          <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-5v-6h-4v6H5a2 2 0 0 1-2-2z"/></svg>
+          <span>Home</span>
+        </button>
+        <button class="nav-item" data-goto="invest">
+          <svg viewBox="0 0 24 24"><path d="M12 3l10 6-10 6L2 9zm0 11l10-6v6L12 20 2 14v-6z"/></svg>
+          <span>Investi</span>
+        </button>
+        <button class="nav-item" data-goto="my">
+          <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zm2 2v3h12V7zM6 13v2h6v-2z"/></svg>
+          <span>Miei invest.</span>
+        </button>
+        <button class="nav-item" data-goto="team">
+          <svg viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7-1a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM9 13c-2.7 0-6 1.4-6 4v2h12v-2c0-2.6-3.3-4-6-4zm7 1c-1 0-2.2.3-3.2.8 1 .9 1.9 2.1 2.1 3.2H22v-2c0-1.6-2.6-2-6-2z"/></svg>
+          <span>Team</span>
+        </button>
+        <button class="nav-item" data-goto="profile">
+          <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3 0-8 1.5-8 4v2h16v-2c0-2.5-5-4-8-4z"/></svg>
+          <span>Profilo</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="admin-user-overlay" id="actionOtpModal" hidden role="dialog" aria-modal="true" aria-labelledby="actionOtpTitle">
+      <section class="admin-user-dialog action-otp-dialog">
+        <button class="btn-mini admin-user-close" id="actionOtpClose" type="button" aria-label="Chiudi">Chiudi</button>
+        <h2 id="actionOtpTitle">Conferma operazione</h2>
+        <p class="admin-user-contact" id="actionOtpDescription"></p>
+        <p class="hint" id="actionOtpDeliveryNote">Il codice arriverà nella campana notifiche o via email. Potrai inserirlo anche dopo aver chiuso questa finestra.</p>
+        <form class="admin-otp-form" id="actionOtpForm">
+          <label for="actionOtpInput">Codice OTP ricevuto</label>
+          <input id="actionOtpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required>
+          <p class="panel-msg error" id="actionOtpError" role="alert"></p>
+          <button class="btn-primary" type="submit">Conferma richiesta</button>
+        </form>
+      </section>
+    </div>
+    <div class="admin-user-overlay" id="adminUserModal" hidden role="dialog" aria-modal="true" aria-labelledby="adminUserTitle">
+      <section class="admin-user-dialog">
+        <button class="btn-mini admin-user-close" id="adminUserClose" type="button" aria-label="Chiudi">Chiudi</button>
+        <div id="adminUserDetail"></div>
+      </section>
+    </div>
+  </div>
+  <script type="module" src="script.js"></script>
+</body>
+</html>
