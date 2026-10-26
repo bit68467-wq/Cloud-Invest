@@ -10,79 +10,87 @@
 <body>
   <div class="app">
 
-    <!-- ==================== P U B L I C   H O M E ==================== -->
+    <!-- ==================== P U B L I C   H O M E (MOBILE LANDING) ==================== -->
     <main class="public-home" id="publicHome">
       <div class="public-wrap">
         <header class="public-nav">
-          <a class="public-brand" href="#top" aria-label="You3invest, inizio pagina">
+          <a class="public-brand" href="#top">
             <span class="logo">Y3</span><span>You3invest</span>
           </a>
-          <nav aria-label="Navigazione principale">
-            <a href="#about">Il progetto</a>
-            <a href="#how">Come funziona</a>
-            <a href="#plans">La piattaforma</a>
-          </nav>
           <div class="public-actions">
             <button class="public-login" type="button" data-auth="login">Accedi</button>
-            <button class="public-join" type="button" data-auth="register">Crea account <span aria-hidden="true">↗</span></button>
+            <button class="public-join" type="button" data-auth="register">Registrati</button>
           </div>
-          <button class="public-mobile-login" type="button" data-auth="login">Accedi</button>
         </header>
 
         <section class="public-hero" id="top">
-          <img class="public-hero-image" src="img/landing-hero.png" alt="Architettura contemporanea immersa nel verde al tramonto">
-          <div class="public-hero-shade"></div>
+          <div class="public-hero-media">
+            <img src="1000086001.png" alt="Architettura contemporanea">
+          </div>
           <div class="public-hero-copy">
             <span class="eyebrow"><i></i> Piattaforma digitale</span>
-            <h1>Una visione più<br>chiara del tuo<br><em>percorso.</em></h1>
-            <p>Uno spazio digitale per esplorare piani, seguire i movimenti e tenere sotto controllo il tuo saldo.</p>
+            <h1>Una visione più chiara del tuo percorso.</h1>
+            <p>Uno spazio digitale per esplorare piani, seguire i movimenti e tenere sotto controllo il tuo saldo in mobilità.</p>
             <div class="public-hero-actions">
-              <button class="public-join" type="button" data-auth="register">Inizia da qui <span aria-hidden="true">↗</span></button>
-              <a class="text-link" href="#about">Scopri il progetto <span aria-hidden="true">↓</span></a>
+              <button class="public-join btn-primary" type="button" data-auth="register">Inizia subito</button>
+              <button class="public-login btn-mini" type="button" data-auth="login" style="width:100%; margin-top:8px;">Ho già un account</button>
             </div>
           </div>
-          <div class="hero-index"><span>01</span><i></i><span>03</span></div>
         </section>
 
         <section class="public-intro" id="about">
-          <div class="intro-label"><span>01 / IL PROGETTO</span><i></i><span>YOU3INVEST</span></div>
-          <div class="intro-grid">
-            <h2>La finanza digitale,<br><em>senza perdere il filo.</em></h2>
-            <div class="intro-copy">
-              <p>You3invest è un progetto che raccoglie in un unico ambiente gli strumenti per esplorare piani, consultare l’andamento e gestire le richieste legate al proprio account.</p>
-              <a href="#how" class="underlined-link">Scopri come funziona <span aria-hidden="true">↗</span></a>
-            </div>
+          <div class="intro-label"><span>01 / IL PROGETTO</span></div>
+          <h2>La finanza digitale, <em>senza perdere il filo.</em></h2>
+          <p class="intro-desc">You3invest raccoglie in un unico ambiente mobile gli strumenti per esplorare piani, consultare l’andamento e gestire le richieste del tuo account.</p>
+          <div class="intro-image-card">
+            <img src="1000086000.png" alt="Dettaglio grafico e bussola">
+            <span class="img-caption">YOU3INVEST · Visione d'insieme</span>
           </div>
-          <figure class="intro-image">
-            <img src="img/landing-detail.png" alt="Dettaglio di una bussola e di un grafico su un tavolo scuro">
-            <figcaption><span>Uno spazio, una visione d’insieme.</span><span>YOU3INVEST</span></figcaption>
-          </figure>
         </section>
 
         <section class="public-how" id="how">
-          <div class="section-kicker"><span>02 / IL PERCORSO</span><span>Tre passaggi, tutto in un unico spazio.</span></div>
-          <div class="how-heading"><h2>Come funziona</h2><p>Esplora le funzionalità, dall’area personale alla consultazione dei movimenti.</p></div>
-          <div class="how-grid">
-            <article class="how-card"><span class="how-number">01</span><div class="how-mark">↗</div><h3>Crea il tuo account</h3><p>Accedi a un’area personale con saldo, profilo e riepilogo delle attività.</p></article>
-            <article class="how-card"><span class="how-number">02</span><div class="how-mark">◷</div><h3>Esplora i piani</h3><p>Consulta durata e parametri dei piani disponibili.</p></article>
-            <article class="how-card"><span class="how-number">03</span><div class="how-mark">⌁</div><h3>Segui i movimenti</h3><p>Visualizza le posizioni, il saldo guadagni e le richieste dall’area riservata.</p></article>
+          <div class="section-kicker"><span>02 / IL PERCORSO</span></div>
+          <h2>Come funziona</h2>
+          <div class="how-stack">
+            <div class="how-card">
+              <span class="how-number">01</span>
+              <div>
+                <h3>Crea il tuo account</h3>
+                <p>Accedi a un’area personale protetta con saldo e profilo.</p>
+              </div>
+            </div>
+            <div class="how-card">
+              <span class="how-number">02</span>
+              <div>
+                <h3>Esplora i piani</h3>
+                <p>Consulta durata e parametri dei piani di investimento disponibili.</p>
+              </div>
+            </div>
+            <div class="how-card">
+              <span class="how-number">03</span>
+              <div>
+                <h3>Segui i movimenti</h3>
+                <p>Monitora posizioni attive, guadagni e richieste in tempo reale.</p>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section class="public-platform" id="plans">
-          <div class="platform-photo"><img src="img/landing-hero.png" alt="Luce calda in un ambiente contemporaneo immerso nella natura"></div>
-          <div class="platform-copy"><span class="section-overline">03 / AREA PERSONALE</span><h2>Ogni informazione,<br><em>al suo posto.</em></h2><p>Una dashboard essenziale per consultare saldo deposito, saldo guadagni, investimenti attivi e storico delle operazioni.</p><ul><li><span>01</span> Riepilogo del wallet</li><li><span>02</span> Stato degli investimenti</li><li><span>03</span> Richieste e notifiche</li></ul><button class="public-join" type="button" data-auth="login">Entra nella piattaforma <span aria-hidden="true">↗</span></button></div>
+        <section class="public-disclaimer">
+          <p>You3invest gestisce piani e rendimenti secondo le condizioni operative del servizio scelto.</p>
+          <button class="btn-primary" type="button" data-auth="register">Accedi all'area riservata</button>
         </section>
 
-        <section class="public-disclaimer"><span>Una nota importante</span><p>You3invest gestisce piani e rendimenti secondo le condizioni operative del servizio scelto.</p><button type="button" data-auth="register">Accedi all'area <span aria-hidden="true">↗</span></button></section>
-
-        <footer class="public-footer"><a class="public-brand" href="#top"><span class="logo">Y3</span><span>You3invest</span></a><span>© You3invest</span><a href="#top">Torna all’inizio ↑</a></footer>
+        <footer class="public-footer">
+          <span class="public-brand"><span class="logo" style="width:28px;height:28px;font-size:12px;">Y3</span> You3invest</span>
+          <p>© You3invest · Tutti i diritti riservati</p>
+        </footer>
       </div>
     </main>
 
     <!-- ==================== A U T H (landing) ==================== -->
     <div class="auth" id="authScreen" hidden>
-      <button class="auth-public-back" id="authPublicBack" type="button">← Torna alla home</button>
+      <button class="auth-public-back btn-mini" id="authPublicBack" type="button" style="margin-bottom: 14px;">← Torna alla home</button>
       <div class="auth-inner">
         <div class="auth-brand">
           <span class="logo">Y3</span>
