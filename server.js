@@ -804,7 +804,10 @@ async function adminTransactions(request, env) {
   if (!user) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
-  const walletChanges = (await env.DB.prepare("SELECT r.*, u.username FROM wallet_change_requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' ORDER BY r.created_at ASC").all()).results;
+  
+  // Inclusione esplicita di old_address e new_address per permettere all'operatore di vederli nel pannello
+  const walletChanges = (await env.DB.prepare("SELECT r.id, r.user_id, r.net, r.old_address, r.new_address, r.created_at, r.status, u.username FROM wallet_change_requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' ORDER BY r.created_at ASC").all()).results;
+  
   const emailVerifications = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM email_verification_requests r JOIN users u ON u.id = r.user_id WHERE r.verified_at IS NULL").all()).results;
   const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
   return Response.json({ deposits, withdrawals, walletChanges, emailVerifications, sensitiveActionVerifications, operator: user.username });
@@ -1084,7 +1087,6 @@ async function requestWalletChange(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
   
-  // Gestisce sia il formato a dizionario (wallets) che il formato con parametri singoli
   let updates = [];
   if (body.wallets) {
     const currentSettings = await env.DB.prepare("SELECT withdraw_wallets FROM settings WHERE user_id = ?").bind(user.id).first();
