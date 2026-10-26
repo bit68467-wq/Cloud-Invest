@@ -441,10 +441,15 @@
         </form>
       </section>
     </div>
+    
     <div class="admin-user-overlay" id="adminUserModal" hidden role="dialog" aria-modal="true" aria-labelledby="adminUserTitle">
       <section class="admin-user-dialog">
         <button class="btn-mini admin-user-close" id="adminUserClose" type="button" aria-label="Chiudi">Chiudi</button>
         <div id="adminUserDetail"></div>
+        <!-- AGGIUNTA MODIFICA: Pulsante elimina utente integrato nella modale operatore -->
+        <div style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+          <button class="btn-primary" id="adminDeleteUserBtn" type="button" style="background-color: #dc3545; color: white; width: 100%;">Elimina Utente</button>
+        </div>
       </section>
     </div>
   </div>
