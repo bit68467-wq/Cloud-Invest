@@ -536,28 +536,16 @@ async function setUserVerificationOtp(request, env, userId) {
   const body = await request.json();
   const otp = typeof body.otp === "string" ? body.otp.trim() : "";
   if (!/^\d{6}$/.test(otp)) return bad("L’OTP deve contenere esattamente 6 cifre.");
-  const user = await env.DB.prepare("SELECT id, email_verified FROM users WHERE id = ?").bind(userId).first();
+  const user = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
   if (!user) return Response.json({ error: "Utente non trovato." }, { status: 404 });
   const expiresAt = Date.now() + 15 * 60 * 1000;
   const salt = genSalt();
   const otpHash = await hash(otp, salt);
 
-  if (user.email_verified) {
-    await env.DB.prepare(
-      "INSERT INTO sensitive_action_verifications (user_id, action, payload_json, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) " +
-      "VALUES (?, 'withdrawal', '{}', ?, ?, ?, ?, 0, ?, ?) " +
-      "ON CONFLICT(user_id) DO UPDATE SET otp_hash = excluded.otp_hash, otp_salt = excluded.otp_salt, otp_expires_at = excluded.otp_expires_at, otp_attempts = 0, issued_at = excluded.issued_at, issued_by = excluded.issued_by, consumed_at = NULL"
-    ).bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
-  } else {
-    const row = await env.DB.prepare("SELECT user_id FROM email_verification_requests WHERE user_id = ?").bind(userId).first();
-    if (!row) {
-      await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?)")
-        .bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
-    } else {
-      await env.DB.prepare("UPDATE email_verification_requests SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ?")
-        .bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
-    }
-  }
+  // La verifica OTP e l'invio tramite notifica gestiscono direttamente le azioni sensibili (es. prelievo)
+  await env.DB.prepare(
+    "UPDATE sensitive_action_verifications SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ? AND consumed_at IS NULL"
+  ).bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
 
   await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
     .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
@@ -695,9 +683,6 @@ async function validateWithdrawal(env, user, body) {
 
 async function withdraw(request, env) {
   const user = await authed(request, env);
-  if (!user.email_verified) {
-    return Response.json({ error: "Verifica l’email prima di richiedere un prelievo.", verificationRequired: true, email: user.identifier }, { status: 403 });
-  }
   const body = await request.json();
   const prepared = await validateWithdrawal(env, user, body);
   if (prepared instanceof Response) return prepared;
@@ -902,7 +887,6 @@ async function saveWallet(request, env) {
 
 async function requestWalletChange(request, env) {
   const user = await authed(request, env);
-  if (!user.email_verified) return Response.json({ error: "Verifica l’email prima di modificare i wallet.", verificationRequired: true, email: user.identifier }, { status: 403 });
   const body = await request.json();
   return await requestSensitiveActionOtp(env, user, "wallet_change", body.wallets || {});
 }
