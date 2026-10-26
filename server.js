@@ -956,7 +956,6 @@ async function reviewTransaction(request, env) {
     const newAddress = reqChange.new_address;
 
     if (action === "approve") {
-      // Controllo di unicità globale: impedisce all'operatore di accettare se il nuovo indirizzo appartiene già a un altro utente
       const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, newAddress.trim().toLowerCase(), userId).first();
       if (existingGlobal) {
         action = "reject";
@@ -1084,43 +1083,78 @@ async function saveWallet(request, env) {
 async function requestWalletChange(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
-  const net = String(body.net || "").trim();
-  const oldAddress = String(body.oldAddress || "").trim();
-  const newAddress = String(body.newAddress || "").trim();
+  
+  // Gestisce sia il formato a dizionario (wallets) che il formato con parametri singoli
+  let updates = [];
+  if (body.wallets) {
+    const currentSettings = await env.DB.prepare("SELECT withdraw_wallets FROM settings WHERE user_id = ?").bind(user.id).first();
+    let currentWallets = {};
+    try { currentWallets = JSON.parse(currentSettings?.withdraw_wallets || "{}"); } catch {}
 
-  if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
-  if (!oldAddress || !newAddress) return bad("Indica sia l'indirizzo originario che il nuovo indirizzo.");
+    for (const [net, addr] of Object.entries(body.wallets)) {
+      const trimmedAddr = String(addr || "").trim();
+      if (trimmedAddr !== "" && ["BNB", "TRC20", "BTC", "USDC"].includes(net)) {
+        const oldAddr = currentWallets[net] || "";
+        if (oldAddr && oldAddr.toLowerCase() !== trimmedAddr.toLowerCase()) {
+          updates.push({ net, oldAddress: oldAddr, newAddress: trimmedAddr });
+        }
+      }
+    }
+  } else {
+    const net = String(body.net || "").trim();
+    const oldAddress = String(body.oldAddress || "").trim();
+    const newAddress = String(body.newAddress || "").trim();
+
+    if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
+    if (!oldAddress || !newAddress) return bad("Indica sia l'indirizzo originario che il nuovo indirizzo.");
+    updates.push({ net, oldAddress, newAddress });
+  }
+
+  if (updates.length === 0) {
+    return bad("Nessuna modifica valida o indirizzo non specificato.");
+  }
 
   const currentSettings = await env.DB.prepare("SELECT withdraw_wallets FROM settings WHERE user_id = ?").bind(user.id).first();
   let currentWallets = {};
   try { currentWallets = JSON.parse(currentSettings?.withdraw_wallets || "{}"); } catch {}
 
-  if (!currentWallets[net] || currentWallets[net].trim().toLowerCase() !== oldAddress.toLowerCase()) {
-    return bad("L'indirizzo originario indicato non corrisponde a quello attualmente registrato per questa rete.");
-  }
-
-  if (oldAddress.toLowerCase() === newAddress.toLowerCase()) {
-    return bad("Il nuovo indirizzo è identico a quello attuale.");
-  }
-
-  const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, newAddress.toLowerCase(), user.id).first();
-  if (existingGlobal) {
-    return bad(`Il nuovo indirizzo per la rete ${net} è già registrato su un altro account.`);
-  }
-
-  const pending = await env.DB.prepare("SELECT id FROM wallet_change_requests WHERE user_id = ? AND net = ? AND status = 'pending'").bind(user.id, net).first();
-  if (pending) {
-    return bad("Esiste già una richiesta di modifica in attesa di approvazione per questa rete.");
-  }
-
   const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO wallet_change_requests (user_id, net, old_address, new_address, created_at, status) VALUES (?, ?, ?, ?, ?, 'pending')")
-      .bind(user.id, net, oldAddress, newAddress, now),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)")
-      .bind(user.id, "Richiesta modifica wallet", `Richiesta di cambio indirizzo per la rete ${net} inviata all'operatore in attesa di approvazione.`, now)
-  ]);
+  const batchStatements = [];
 
+  for (const up of updates) {
+    if (!currentWallets[up.net] || currentWallets[up.net].trim().toLowerCase() !== up.oldAddress.toLowerCase()) {
+      return bad(`L'indirizzo originario per la rete ${up.net} non corrisponde a quello attualmente registrato.`);
+    }
+
+    if (up.oldAddress.toLowerCase() === up.newAddress.toLowerCase()) {
+      continue;
+    }
+
+    const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(up.net, up.newAddress.toLowerCase(), user.id).first();
+    if (existingGlobal) {
+      return bad(`Il nuovo indirizzo per la rete ${up.net} è già registrato su un altro account.`);
+    }
+
+    const pending = await env.DB.prepare("SELECT id FROM wallet_change_requests WHERE user_id = ? AND net = ? AND status = 'pending'").bind(user.id, up.net).first();
+    if (pending) {
+      return bad(`Esiste già una richiesta di modifica in attesa di approvazione per la rete ${up.net}.`);
+    }
+
+    batchStatements.push(
+      env.DB.prepare("INSERT INTO wallet_change_requests (user_id, net, old_address, new_address, created_at, status) VALUES (?, ?, ?, ?, ?, 'pending')")
+        .bind(user.id, up.net, up.oldAddress, up.newAddress, now)
+    );
+    batchStatements.push(
+      env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)")
+        .bind(user.id, "Richiesta modifica wallet", `Richiesta di cambio indirizzo per la rete ${up.net} inviata all'operatore in attesa di approvazione.`, now)
+    );
+  }
+
+  if (batchStatements.length === 0) {
+    return bad("Nessuna modifica da richiedere.");
+  }
+
+  await env.DB.batch(batchStatements);
   return Response.json({ ok: true, message: "Richiesta di modifica inviata con successo all'operatore." });
 }
 
