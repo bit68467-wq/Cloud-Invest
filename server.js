@@ -805,8 +805,17 @@ async function adminTransactions(request, env) {
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
   
-  // Inclusione esplicita di old_address e new_address per permettere all'operatore di vederli nel pannello
-  const walletChanges = (await env.DB.prepare("SELECT r.id, r.user_id, r.net, r.old_address, r.new_address, r.created_at, r.status, u.username FROM wallet_change_requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' ORDER BY r.created_at ASC").all()).results;
+  // Aggiunti alias sia camelCase che snake_case per garantire che il pannello dell'operatore veda sempre i due indirizzi
+  const walletChanges = (await env.DB.prepare(`
+    SELECT r.id, r.user_id, r.net, 
+           r.old_address, r.old_address AS oldAddress, 
+           r.new_address, r.new_address AS newAddress, 
+           r.created_at, r.status, u.username 
+    FROM wallet_change_requests r 
+    JOIN users u ON u.id = r.user_id 
+    WHERE r.status = 'pending' 
+    ORDER BY r.created_at ASC
+  `).all()).results;
   
   const emailVerifications = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM email_verification_requests r JOIN users u ON u.id = r.user_id WHERE r.verified_at IS NULL").all()).results;
   const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
@@ -1048,7 +1057,6 @@ async function saveWallet(request, env) {
   for (const [net, addr] of Object.entries(wallets)) {
     const trimmedAddr = String(addr || "").trim();
     if (trimmedAddr !== "") {
-      // Blocca la modifica diretta se la rete ha già un indirizzo diverso
       if (currentWallets[net] && currentWallets[net].trim().toLowerCase() !== trimmedAddr.toLowerCase()) {
         return bad(`Hai già un indirizzo registrato per la rete ${net}. Non puoi modificarlo direttamente; utilizza la funzione di richiesta modifica.`);
       }
@@ -1088,77 +1096,76 @@ async function requestWalletChange(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
   
-  let updates = [];
-  if (body.wallets) {
-    const currentSettings = await env.DB.prepare("SELECT withdraw_wallets FROM settings WHERE user_id = ?").bind(user.id).first();
-    let currentWallets = {};
-    try { currentWallets = JSON.parse(currentSettings?.withdraw_wallets || "{}"); } catch {}
-
-    for (const [net, addr] of Object.entries(body.wallets)) {
-      const trimmedAddr = String(addr || "").trim();
-      if (trimmedAddr !== "" && ["BNB", "TRC20", "BTC", "USDC"].includes(net)) {
-        const oldAddr = currentWallets[net] || "";
-        if (oldAddr && oldAddr.toLowerCase() !== trimmedAddr.toLowerCase()) {
-          updates.push({ net, oldAddress: oldAddr, newAddress: trimmedAddr });
-        }
-      }
-    }
-  } else {
-    const net = String(body.net || "").trim();
-    const oldAddress = String(body.oldAddress || "").trim();
-    const newAddress = String(body.newAddress || "").trim();
-
-    if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
-    if (!oldAddress || !newAddress) return bad("Indica sia l'indirizzo originario che il nuovo indirizzo.");
-    updates.push({ net, oldAddress, newAddress });
-  }
-
-  if (updates.length === 0) {
-    return bad("Nessuna modifica valida o indirizzo non specificato.");
-  }
-
   const currentSettings = await env.DB.prepare("SELECT withdraw_wallets FROM settings WHERE user_id = ?").bind(user.id).first();
   let currentWallets = {};
   try { currentWallets = JSON.parse(currentSettings?.withdraw_wallets || "{}"); } catch {}
 
+  const inputWallets = body.wallets || {};
+  if (body.net && body.newAddress) {
+    inputWallets[body.net] = body.newAddress;
+  }
+
+  const finalWallets = { ...currentWallets };
   const now = Date.now();
   const batchStatements = [];
+  let changesRequested = false;
 
-  for (const up of updates) {
-    if (!currentWallets[up.net] || currentWallets[up.net].trim().toLowerCase() !== up.oldAddress.toLowerCase()) {
-      return bad(`L'indirizzo originario per la rete ${up.net} non corrisponde a quello attualmente registrato.`);
+  for (const [net, addr] of Object.entries(inputWallets)) {
+    const trimmedAddr = String(addr || "").trim();
+    if (trimmedAddr === "" || !["BNB", "TRC20", "BTC", "USDC"].includes(net)) continue;
+
+    const oldAddr = currentWallets[net] || "";
+
+    if (!oldAddr) {
+      // Se la rete non era ancora impostata, la salva direttamente (permette di impostare le altre reti in un secondo momento)
+      const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, trimmedAddr.toLowerCase(), user.id).first();
+      if (existingGlobal) {
+        return bad(`Questo indirizzo per la rete ${net} è già registrato su un altro account.`);
+      }
+      finalWallets[net] = trimmedAddr;
+      batchStatements.push(
+        env.DB.prepare("INSERT INTO user_withdrawal_addresses (user_id, net, address, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, net, address) DO NOTHING")
+          .bind(user.id, net, trimmedAddr, now)
+      );
+    } else if (oldAddr.toLowerCase() !== trimmedAddr.toLowerCase()) {
+      // Se la rete ha già un indirizzo ed è diverso, avvia la richiesta di modifica per l'operatore
+      const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, trimmedAddr.toLowerCase(), user.id).first();
+      if (existingGlobal) {
+        return bad(`Il nuovo indirizzo per la rete ${net} è già registrato su un altro account.`);
+      }
+
+      const pending = await env.DB.prepare("SELECT id FROM wallet_change_requests WHERE user_id = ? AND net = ? AND status = 'pending'").bind(user.id, net).first();
+      if (pending) {
+        return bad(`Esiste già una richiesta di modifica in attesa di approvazione per la rete ${net}.`);
+      }
+
+      batchStatements.push(
+        env.DB.prepare("INSERT INTO wallet_change_requests (user_id, net, old_address, new_address, created_at, status) VALUES (?, ?, ?, ?, ?, 'pending')")
+          .bind(user.id, net, oldAddr, trimmedAddr, now)
+      );
+      batchStatements.push(
+        env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)")
+          .bind(user.id, "Richiesta modifica wallet", `Richiesta di cambio indirizzo per la rete ${net} inviata all'operatore in attesa di approvazione.`, now)
+      );
+      changesRequested = true;
     }
-
-    if (up.oldAddress.toLowerCase() === up.newAddress.toLowerCase()) {
-      continue;
-    }
-
-    const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(up.net, up.newAddress.toLowerCase(), user.id).first();
-    if (existingGlobal) {
-      return bad(`Il nuovo indirizzo per la rete ${up.net} è già registrato su un altro account.`);
-    }
-
-    const pending = await env.DB.prepare("SELECT id FROM wallet_change_requests WHERE user_id = ? AND net = ? AND status = 'pending'").bind(user.id, up.net).first();
-    if (pending) {
-      return bad(`Esiste già una richiesta di modifica in attesa di approvazione per la rete ${up.net}.`);
-    }
-
-    batchStatements.push(
-      env.DB.prepare("INSERT INTO wallet_change_requests (user_id, net, old_address, new_address, created_at, status) VALUES (?, ?, ?, ?, ?, 'pending')")
-        .bind(user.id, up.net, up.oldAddress, up.newAddress, now)
-    );
-    batchStatements.push(
-      env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)")
-        .bind(user.id, "Richiesta modifica wallet", `Richiesta di cambio indirizzo per la rete ${up.net} inviata all'operatore in attesa di approvazione.`, now)
-    );
   }
 
   if (batchStatements.length === 0) {
-    return bad("Nessuna modifica da richiedere.");
+    return bad("Nessuna modifica o nuovo indirizzo valido specificato.");
   }
 
+  batchStatements.unshift(
+    env.DB.prepare("INSERT INTO settings (user_id, withdraw_wallets, notifications) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET withdraw_wallets = excluded.withdraw_wallets")
+      .bind(user.id, JSON.stringify(finalWallets))
+  );
+
   await env.DB.batch(batchStatements);
-  return Response.json({ ok: true, message: "Richiesta di modifica inviata con successo all'operatore." });
+  return Response.json({ 
+    ok: true, 
+    message: changesRequested ? "Richiesta di modifica inviata all'operatore e nuovi indirizzi salvati." : "Indirizzi salvati con successo.",
+    acc: { withdraw_wallets: finalWallets, notifications: true } 
+  });
 }
 
 async function updateSettings(request, env) {
