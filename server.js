@@ -210,7 +210,7 @@ async function fullState(env, user, request) {
   const wallet = await accrue(env, user.id);
   const investments = (await env.DB.prepare("SELECT * FROM investments WHERE user_id = ? ORDER BY id DESC").bind(user.id).all()).results;
   const deposits = (await env.DB.prepare("SELECT * FROM deposits WHERE user_id = ? ORDER BY id DESC").bind(user.id).all()).results;
-  const withdrawals = (await env.DB.percentile || await env.DB.prepare("SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC").bind(user.id).all()).results;
+  const withdrawals = (await env.DB.prepare("SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC").bind(user.id).all()).results;
   const team = (await env.DB.prepare(
     "WITH RECURSIVE referral_tree(id, username, created_at, level) AS (" +
     " SELECT id, username, created_at, 1 FROM users WHERE referred_by = ?" +
@@ -228,16 +228,18 @@ async function fullState(env, user, request) {
   const inviteStats = await inviterStats(env, user.id);
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id = ?").bind(user.id).first();
   
-  // Modifica chiave: se l'email non è verificata ed esiste la richiesta, impostiamo un'azione fittizia o bloccante 
-  // che non espone il pulsante interattivo ma mostra semplicemente lo stato di attesa.
+  // Mostra il banner "Account in verifica" finché l'email non è verificata e c'è una richiesta attiva senza OTP inserito dall'utente
   let sensitiveAction = null;
   if (!user.email_verified) {
-    const vReq = await env.DB.prepare("SELECT requested_at, otp_expires_at FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
+    const vReq = await env.DB.prepare("SELECT requested_at, otp_expires_at, otp_hash FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
     if (vReq) {
       sensitiveAction = {
-        action: "email_sent_waiting",
+        action: "email_verification",
+        title: "Account in verifica",
+        message: "Richiesta di verifica inviata. Attendi che l'amministratore ti fornisca il codice OTP.",
         requestedAt: vReq.requested_at,
-        otpExpiresAt: vReq.otp_expires_at
+        otpExpiresAt: vReq.otp_expires_at,
+        hasOtpIssued: !!vReq.otp_hash
       };
     }
   }
