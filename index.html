@@ -21,7 +21,7 @@
           </div>
         </div>
 
-        <div class="auth-tabs">
+        <div class="auth-tabs" id="authTabsContainer">
           <button class="auth-tab active" id="tabLogin">Accedi</button>
           <button class="auth-tab" id="tabRegister">Registrati</button>
         </div>
@@ -33,6 +33,7 @@
           <input class="auth-input" type="password" id="loginPass" autocomplete="current-password" placeholder="••••••••" required>
           <p class="auth-err" id="loginErr"></p>
           <button type="submit" class="btn-primary">Accedi</button>
+          <button type="button" class="btn-mini auth-back" id="forgotPasswordBtn" style="margin-top: 12px; width: 100%; background: transparent; color: var(--accent); border: 1px solid var(--border);">Password dimenticata?</button>
         </form>
 
         <form class="auth-form" id="registerForm" autocomplete="off" hidden>
@@ -41,20 +42,43 @@
           <label class="field-label">Nome utente (user)</label>
           <input class="auth-input" id="regUser" placeholder="es. marco90" required>
           <div class="two">
-<div>
-                  <label class="field-label" for="regPass">Password</label>
-                  <input class="auth-input" type="password" id="regPass" autocomplete="new-password" placeholder="••••••••" required>
-                </div>
-                <div>
-                  <label class="field-label" for="regPass2">Conferma</label>
-                  <input class="auth-input" type="password" id="regPass2" autocomplete="new-password" placeholder="••••••••" required>
-                </div>
+            <div>
+              <label class="field-label" for="regPass">Password</label>
+              <input class="auth-input" type="password" id="regPass" autocomplete="new-password" placeholder="••••••••" required>
+            </div>
+            <div>
+              <label class="field-label" for="regPass2">Conferma</label>
+              <input class="auth-input" type="password" id="regPass2" autocomplete="new-password" placeholder="••••••••" required>
+            </div>
           </div>
           <label class="field-label">Codice invito <em>(opzionale)</em></label>
           <input class="auth-input" id="regInvite" placeholder="Codice invito (opzionale)">
           <p class="auth-err" id="regErr"></p>
           <button type="submit" class="btn-primary">Registrati</button>
         </form>
+
+        <!-- Pannello recupero password -->
+        <section id="passwordRecoveryPanel" hidden>
+          <p class="otp-text">Inserisci la tua email registrata per richiedere il recupero della password tramite codice OTP.</p>
+          <form class="auth-form" id="recoveryRequestForm">
+            <label class="field-label" for="recoveryEmail">Indirizzo email</label>
+            <input class="auth-input" id="recoveryEmail" type="email" autocomplete="email" placeholder="nome@email.com" required>
+            <p class="auth-err" id="recoveryRequestErr"></p>
+            <button type="submit" class="btn-primary">Richiedi recupero password</button>
+          </form>
+          <a class="btn-primary mail-link" id="recoveryEmailLink" hidden>Apri email precompilata</a>
+          <p class="hint" id="recoveryRequestMsg" role="status"></p>
+          
+          <form class="auth-form" id="recoveryConfirmForm" hidden style="margin-top: 20px;">
+            <label class="field-label" for="recoveryOtp">Codice OTP</label>
+            <input class="auth-input otp-input" id="recoveryOtp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required>
+            <label class="field-label" for="recoveryNewPass">Nuova password</label>
+            <input class="auth-input" type="password" id="recoveryNewPass" autocomplete="new-password" placeholder="••••••••" required>
+            <p class="auth-err" id="recoveryConfirmErr"></p>
+            <button type="submit" class="btn-primary">Reimposta password</button>
+          </form>
+          <button class="btn-mini auth-back" id="recoveryBack" type="button" style="margin-top: 15px;">Torna all’accesso</button>
+        </section>
 
         <section id="verificationPanel" hidden>
           <p class="otp-text">Per prelievi e modifiche wallet serve un OTP inviato all’email verificata. Inserisci le credenziali e richiedi il codice.</p>
@@ -446,7 +470,6 @@
       <section class="admin-user-dialog">
         <button class="btn-mini admin-user-close" id="adminUserClose" type="button" aria-label="Chiudi">Chiudi</button>
         <div id="adminUserDetail"></div>
-        <!-- AGGIUNTA MODIFICA: Pulsante elimina utente integrato nella modale operatore -->
         <div style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
           <button class="btn-primary" id="adminDeleteUserBtn" type="button" style="background-color: #dc3545; color: white; width: 100%;">Elimina Utente</button>
         </div>
