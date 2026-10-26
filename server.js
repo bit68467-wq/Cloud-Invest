@@ -228,8 +228,20 @@ async function fullState(env, user, request) {
   const inviteStats = await inviterStats(env, user.id);
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id = ?").bind(user.id).first();
   
-  // Non restituiamo alcuna azione sensibile pendente per i prelievi, così il banner scompare del tutto
+  // Gestione del banner per "Account in verifica"
   let sensitiveAction = null;
+  if (!user.email_verified) {
+    const vReq = await env.DB.prepare("SELECT requested_at, otp_expires_at FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
+    if (vReq) {
+      sensitiveAction = {
+        action: "email_verification",
+        title: "Account in verifica",
+        message: "Richiesta di verifica inviata. Attendi che l'amministratore ti fornisca il codice OTP.",
+        requestedAt: vReq.requested_at,
+        otpExpiresAt: vReq.otp_expires_at
+      };
+    }
+  }
 
   let withdraw_wallets = {};
   let notifications = true;
@@ -492,7 +504,7 @@ async function requestEmailVerification(request, env) {
 
   const now = Date.now();
   await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_attempts, verified_at) VALUES (?, ?, 0, NULL) ON CONFLICT(user_id) DO UPDATE SET requested_at = excluded.requested_at, verified_at = NULL").bind(user.id, now).run();
-  return Response.json({ ok: true, email: user.identifier, username: user.username, userId: user.id, requestedAt: now });
+  return Response.json({ ok: true, email: user.identifier, username: user.username, userId: user.id, requestedAt: now, pendingVerification: true });
 }
 
 async function confirmEmailVerification(request, env) {
@@ -531,9 +543,20 @@ async function setUserVerificationOtp(request, env, userId) {
   const body = await request.json();
   const otp = typeof body.otp === "string" ? body.otp.trim() : "";
   if (!/^\d{6}$/.test(otp)) return bad("L’OTP deve contenere esattamente 6 cifre.");
-  const user = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
+  const user = await env.DB.prepare("SELECT id, email_verified FROM users WHERE id = ?").bind(userId).first();
   if (!user) return Response.json({ error: "Utente non trovato." }, { status: 404 });
   const expiresAt = Date.now() + 15 * 60 * 1000;
+  const salt = genSalt();
+  const otpHash = await hash(otp, salt);
+
+  const row = await env.DB.prepare("SELECT user_id FROM email_verification_requests WHERE user_id = ?").bind(userId).first();
+  if (!row) {
+    await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?)")
+      .bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
+  } else {
+    await env.DB.prepare("UPDATE email_verification_requests SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ?")
+      .bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
+  }
 
   await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
     .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
@@ -648,30 +671,32 @@ async function invest(request, env) {
   return Response.json({ ok: true, wallet: await accrue(env, user.id) });
 }
 
-async function withdraw(request, env) {
-  const user = await authed(request, env);
-  const body = await request.json();
+async function validateWithdrawal(env, user, body) {
   const amount = Number(body.amount);
   const net = String(body.net || "").trim();
-  const address = String(body.address || "wallet-default").trim();
-
   if (!Number.isFinite(amount) || amount < 50) return bad("Il prelievo minimo è di 50 USDT.");
   if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
-  
   const wallet = await accrue(env, user.id);
   if (amount > wallet.earnings + 1e-9) return bad("Saldo guadagni non sufficiente.");
+  return { amount, net, address: body.address || "wallet-default" };
+}
+
+async function withdraw(request, env) {
+  const user = await authed(request, env);
+  if (!user.email_verified) {
+    return Response.json({ error: "Verifica l’email prima di richiedere un prelievo.", verificationRequired: true, email: user.identifier }, { status: 403 });
+  }
+  const body = await request.json();
+  const prepared = await validateWithdrawal(env, user, body);
+  if (prepared instanceof Response) return prepared;
 
   const created = Date.now();
-  
-  // Il prelievo viene inserito direttamente in stato pending, sottraendo i fondi dal saldo guadagni,
-  // senza passare per la tabella dei codici OTP dell'utente (eliminando così qualsiasi banner indesiderato).
   await env.DB.batch([
-    env.DB.prepare("UPDATE wallets SET earnings = earnings - ? WHERE user_id = ?").bind(amount, user.id),
+    env.DB.prepare("UPDATE wallets SET earnings = earnings - ? WHERE user_id = ?").bind(prepared.amount, user.id),
     env.DB.prepare("INSERT INTO withdrawals (user_id, amount, net, date, status, wallet_address) VALUES (?, ?, ?, ?, 'pending', ?)")
-      .bind(user.id, amount, net, created, address),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Richiesta di prelievo inviata", amount.toFixed(2) + " USDT · " + net + " · In attesa di verifica.", created),
+      .bind(user.id, prepared.amount, prepared.net, created, prepared.address),
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Richiesta di prelievo inviata", prepared.amount.toFixed(2) + " USDT · " + prepared.net + " · In attesa di verifica.", created),
   ]);
-
   return Response.json({ ok: true, status: "pending" });
 }
 
@@ -744,7 +769,7 @@ async function reviewTransaction(request, env) {
       await env.DB.prepare("UPDATE deposits SET status = 'approved' WHERE id = ?").bind(id).run();
       await env.DB.prepare("UPDATE wallets SET deposit = deposit + ?, total_deposited = total_deposited + ? WHERE user_id = ?").bind(amount, amount, userId).run();
 
-      const existingFirst = await env.DB.prepare("SELECT 1 FROM referral_first_deposits WHERE source_user_id = ?").bind(userId).first();
+      const existingFirst = await env.DB.prepare("SELECT 1 FROM referral_first deposits WHERE source_user_id = ?").bind(userId).first();
       if (!existingFirst) {
         const now = Date.now();
         await env.DB.prepare("INSERT OR IGNORE INTO referral_first_deposits (source_user_id, deposit_id, created_at) VALUES (?, ?, ?)").bind(userId, id, now).run();
@@ -848,6 +873,7 @@ async function saveWallet(request, env) {
 
 async function requestWalletChange(request, env) {
   const user = await authed(request, env);
+  if (!user.email_verified) return Response.json({ error: "Verifica l’email prima di modificare i wallet.", verificationRequired: true, email: user.identifier }, { status: 403 });
   const body = await request.json();
   const wallets = body.wallets || {};
   await env.DB.prepare("INSERT INTO settings (user_id, withdraw_wallets, notifications) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET withdraw_wallets = excluded.withdraw_wallets")
