@@ -165,15 +165,15 @@ async function accrue(env, userId) {
   let accruedAmount = 0;
   for (const inv of invs) {
     const elapsed = (now - inv.created) / DAY;
-    const target = Math.min(inv.days, Math.floor(elapsed));
-    if (target > inv.credited) {
-      // Rendimento giornaliero accreditato nel saldo guadagni (prelevabile)
+    const target = Math.min(inv.days, elapsed);
+    if (target > inv.credited + 1e-9) {
+      // Rendimenti accreditati in tempo reale nel saldo guadagni (prelevabile)
       const gain = (inv.amount * inv.rate / 100) * (target - inv.credited);
       wallet.earnings += gain;
       wallet.total_earned += gain;
       accruedAmount += gain;
 
-      // Alla scadenza del piano, restituisce il capitale investito nel saldo guadagni (prelevabile)
+      // Restituzione del capitale investito nel saldo guadagni (prelevabile) solo alla scadenza del piano
       if (target >= inv.days && inv.credited < inv.days) {
         wallet.earnings += inv.amount;
         accruedAmount += inv.amount;
