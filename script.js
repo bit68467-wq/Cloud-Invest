@@ -25,36 +25,6 @@ let state = null;
 let token = localStorage.getItem(TOKEN_KEY);
 let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY);
 
-function showPublicHome() {
-  resetAuthTabs();
-  $('authScreen').hidden = true;
-  $('appBody').hidden = true;
-  $('operatorScreen').hidden = true;
-  $('publicHome').hidden = false;
-  window.scrollTo({ top: 0 });
-}
-
-function openAuth(mode = 'login') {
-  $('publicHome').hidden = true;
-  $('authScreen').hidden = false;
-  resetAuthTabs();
-  if (mode === 'register') {
-    $('tabLogin').classList.remove('active');
-    $('tabRegister').classList.add('active');
-    $('loginForm').hidden = true;
-    $('registerForm').hidden = false;
-  }
-  window.scrollTo({ top: 0 });
-}
-
-document.querySelectorAll('[data-auth]').forEach(button => {
-  button.addEventListener('click', () => openAuth(button.dataset.auth));
-});
-
-if ($('authPublicBack')) {
-  $('authPublicBack').addEventListener('click', showPublicHome);
-}
-
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (token) headers['x-session-token'] = token;
@@ -170,7 +140,6 @@ function avatar(name) {
 }
 
 function enterApp() {
-  $('publicHome').hidden = true;
   $('authScreen').hidden = true;
   $('operatorScreen').hidden = true;
   $('appBody').hidden = false;
@@ -179,7 +148,6 @@ function enterApp() {
   startNotificationPolling();
 }
 function enterOperator(data) {
-  $('publicHome').hidden = true;
   $('authScreen').hidden = true;
   $('appBody').hidden = true;
   $('operatorScreen').hidden = false;
@@ -200,7 +168,8 @@ async function logoutOperator() {
       localStorage.removeItem(TOKEN_KEY);
     }
   }
-  showPublicHome();
+  $('authScreen').hidden = false;
+  resetAuthTabs();
 }
 async function logout() {
   try { await api('/api/logout', { method: 'POST' }); } catch {}
@@ -212,13 +181,14 @@ async function logout() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(ADMIN_TOKEN_KEY);
   state = null;
+  $('authScreen').hidden = false;
   $('operatorScreen').hidden = true;
   $('appBody').hidden = true;
   $('loginForm').hidden = false;
   $('registerForm').hidden = true;
   $('loginId').value = ''; $('loginPass').value = '';
   hideAuthMsg();
-  showPublicHome();
+  resetAuthTabs();
 }
 
 const VIEWS = ['home', 'invest', 'withdraw', 'my', 'team', 'profile'];
@@ -1386,7 +1356,8 @@ $('logoutBtn').addEventListener('click', () => logout());
       localStorage.removeItem(TOKEN_KEY);
     }
   }
-  showPublicHome();
+  $('authScreen').hidden = false;
+  $('appBody').hidden = true;
 })();
 
 setInterval(async () => {
