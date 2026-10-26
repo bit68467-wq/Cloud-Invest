@@ -882,6 +882,38 @@ async function openAdminUser(userId) {
   }
 }
 
+// Funzione per eliminare l'utente dal pannello amministratore
+async function deleteUser(userId) {
+  if (!confirm("Sei sicuro di voler eliminare definitivamente questo utente e tutti i suoi dati (wallet, depositi, prelievi, investimenti)? L'operazione è irreversibile.")) {
+    return;
+  }
+  try {
+    await api(`/api/admin/users/${encodeURIComponent(userId)}/delete`, { method: 'POST' });
+    alert("Utente eliminato con successo.");
+    $('adminUserModal').hidden = true;
+    
+    // Aggiorna le liste utenti aperte se visibili
+    if (!$('operatorUsersSection').hidden) {
+      await toggleAdminUsers('operatorUsersSection', 'operatorUsersList', 'operatorUsersToggle');
+      await toggleAdminUsers('operatorUsersSection', 'operatorUsersList', 'operatorUsersToggle');
+    }
+    if (!$('ownerUsersSection').hidden) {
+      await toggleAdminUsers('ownerUsersSection', 'ownerUsersList', 'ownerUsersToggle');
+      await toggleAdminUsers('ownerUsersSection', 'ownerUsersList', 'ownerUsersToggle');
+    }
+    await renderAdminQueue(true);
+  } catch (err) {
+    alert("Errore: " + err.message);
+  }
+}
+
+// Event listener per il pulsante elimina utente nella modale
+$('adminDeleteUserBtn')?.addEventListener('click', async () => {
+  const userId = $('adminUserModal').dataset.userId;
+  if (!userId) return;
+  await deleteUser(userId);
+});
+
 document.addEventListener('click', e => {
   const userLink = e.target.closest('[data-admin-user]');
   if (userLink) openAdminUser(userLink.dataset.adminUser);
