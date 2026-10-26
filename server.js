@@ -228,17 +228,18 @@ async function fullState(env, user, request) {
   const inviteStats = await inviterStats(env, user.id);
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id = ?").bind(user.id).first();
   
-  // Gestione del banner per "Account in verifica"
+  // Mostra il banner "Account in verifica" finché l'email non è verificata e c'è una richiesta attiva senza OTP inserito dall'utente
   let sensitiveAction = null;
   if (!user.email_verified) {
-    const vReq = await env.DB.prepare("SELECT requested_at, otp_expires_at FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
+    const vReq = await env.DB.prepare("SELECT requested_at, otp_expires_at, otp_hash FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
     if (vReq) {
       sensitiveAction = {
         action: "email_verification",
         title: "Account in verifica",
         message: "Richiesta di verifica inviata. Attendi che l'amministratore ti fornisca il codice OTP.",
         requestedAt: vReq.requested_at,
-        otpExpiresAt: vReq.otp_expires_at
+        otpExpiresAt: vReq.otp_expires_at,
+        hasOtpIssued: !!vReq.otp_hash
       };
     }
   }
@@ -504,7 +505,7 @@ async function requestEmailVerification(request, env) {
 
   const now = Date.now();
   await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_attempts, verified_at) VALUES (?, ?, 0, NULL) ON CONFLICT(user_id) DO UPDATE SET requested_at = excluded.requested_at, verified_at = NULL").bind(user.id, now).run();
-  return Response.json({ ok: true, email: user.identifier, username: user.username, userId: user.id, requestedAt: now, pendingVerification: true });
+  return Response.json({ ok: true, email: user.identifier, username: user.username, userId: user.id, requestedAt: now });
 }
 
 async function confirmEmailVerification(request, env) {
@@ -769,7 +770,7 @@ async function reviewTransaction(request, env) {
       await env.DB.prepare("UPDATE deposits SET status = 'approved' WHERE id = ?").bind(id).run();
       await env.DB.prepare("UPDATE wallets SET deposit = deposit + ?, total_deposited = total_deposited + ? WHERE user_id = ?").bind(amount, amount, userId).run();
 
-      const existingFirst = await env.DB.prepare("SELECT 1 FROM referral_first deposits WHERE source_user_id = ?").bind(userId).first();
+      const existingFirst = await env.DB.prepare("SELECT 1 FROM referral_first_deposits WHERE source_user_id = ?").bind(userId).first();
       if (!existingFirst) {
         const now = Date.now();
         await env.DB.prepare("INSERT OR IGNORE INTO referral_first_deposits (source_user_id, deposit_id, created_at) VALUES (?, ?, ?)").bind(userId, id, now).run();
