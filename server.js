@@ -446,6 +446,9 @@ const workerHandler = {
       
       const adminBalanceMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/balance$/);
       if (method === "POST" && adminBalanceMatch) return await adminUpdateUserBalance(request, env, adminBalanceMatch[1]);
+
+      const adminDeleteMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/delete$/);
+      if (method === "POST" && adminDeleteMatch) return await adminDeleteUser(request, env, adminDeleteMatch[1]);
       
       if (method === "POST" && pathName === "/api/admin/review") return await reviewTransaction(request, env);
       if (method === "POST" && pathName === "/api/admin/credential") return await setAdminCredential(request, env);
@@ -829,6 +832,36 @@ async function adminUpdateUserBalance(request, env, userId) {
   return Response.json({ ok: true });
 }
 
+// Funzione per eliminare completamente un utente e tutti i dati associati
+async function adminDeleteUser(request, env, userId) {
+  const actor = await adminActor(request, env);
+  if (!actor) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  
+  const target = await env.DB.prepare("SELECT identifier FROM users WHERE id = ?").bind(userId).first();
+  if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
+  if (target.identifier.toLowerCase() === "h9invest@gmail.com") {
+    return bad("Non è possibile eliminare l'account amministratore principale.");
+  }
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM admin_sessions WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM email_verification_requests WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM sensitive_action_verifications WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM notifications WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM wallets WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM investments WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM referral_commissions WHERE user_id = ? OR source_user_id = ?").bind(userId, userId),
+    env.DB.prepare("DELETE FROM referral_first_deposits WHERE source_user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM deposits WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM withdrawals WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM settings WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId)
+  ]);
+
+  return Response.json({ ok: true, message: "Utente e tutti i dati associati eliminati con successo." });
+}
+
 async function reviewTransaction(request, env) {
   const operator = await adminActor(request, env);
   if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
@@ -950,7 +983,6 @@ async function saveWallet(request, env) {
   const body = await request.json();
   const wallets = body.wallets || {};
 
-  // Controllo unicità degli indirizzi wallet rispetto ad altri utenti prima di salvare
   const allSettings = (await env.DB.prepare("SELECT user_id, withdraw_wallets FROM settings WHERE user_id != ?").bind(user.id).all()).results;
   for (const s of allSettings) {
     try {
@@ -974,7 +1006,6 @@ async function requestWalletChange(request, env) {
   const body = await request.json();
   const wallets = body.wallets || {};
 
-  // Controllo unicità degli indirizzi wallet rispetto ad altri utenti prima della richiesta
   const allSettings = (await env.DB.prepare("SELECT user_id, withdraw_wallets FROM settings WHERE user_id != ?").bind(user.id).all()).results;
   for (const s of allSettings) {
     try {
