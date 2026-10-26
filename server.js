@@ -805,17 +805,27 @@ async function adminTransactions(request, env) {
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
   
-  // Aggiunti alias sia camelCase che snake_case per garantire che il pannello dell'operatore veda sempre i due indirizzi
-  const walletChanges = (await env.DB.prepare(`
-    SELECT r.id, r.user_id, r.net, 
-           r.old_address, r.old_address AS oldAddress, 
-           r.new_address, r.new_address AS newAddress, 
-           r.created_at, r.status, u.username 
+  // Mappatura completa di tutte le possibili chiavi richieste dal frontend (vecchio e nuovo indirizzo)
+  const rawWalletChanges = (await env.DB.prepare(`
+    SELECT r.id, r.user_id, r.net, r.old_address, r.new_address, r.created_at, r.status, u.username, u.identifier 
     FROM wallet_change_requests r 
     JOIN users u ON u.id = r.user_id 
     WHERE r.status = 'pending' 
     ORDER BY r.created_at ASC
   `).all()).results;
+
+  const walletChanges = rawWalletChanges.map(w => ({
+    ...w,
+    oldAddress: w.old_address,
+    newAddress: w.new_address,
+    old_address: w.old_address,
+    new_address: w.new_address,
+    address: `Da: ${w.old_address} -> A: ${w.new_address}`,
+    wallet_address: `Da: ${w.old_address} -> A: ${w.new_address}`,
+    walletAddress: `Da: ${w.old_address} -> A: ${w.new_address}`,
+    account: `Da: ${w.old_address} -> A: ${w.new_address}`,
+    details: `Da: ${w.old_address} -> A: ${w.new_address}`
+  }));
   
   const emailVerifications = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM email_verification_requests r JOIN users u ON u.id = r.user_id WHERE r.verified_at IS NULL").all()).results;
   const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
@@ -1117,7 +1127,6 @@ async function requestWalletChange(request, env) {
     const oldAddr = currentWallets[net] || "";
 
     if (!oldAddr) {
-      // Se la rete non era ancora impostata, la salva direttamente (permette di impostare le altre reti in un secondo momento)
       const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, trimmedAddr.toLowerCase(), user.id).first();
       if (existingGlobal) {
         return bad(`Questo indirizzo per la rete ${net} è già registrato su un altro account.`);
@@ -1128,7 +1137,6 @@ async function requestWalletChange(request, env) {
           .bind(user.id, net, trimmedAddr, now)
       );
     } else if (oldAddr.toLowerCase() !== trimmedAddr.toLowerCase()) {
-      // Se la rete ha già un indirizzo ed è diverso, avvia la richiesta di modifica per l'operatore
       const existingGlobal = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, trimmedAddr.toLowerCase(), user.id).first();
       if (existingGlobal) {
         return bad(`Il nuovo indirizzo per la rete ${net} è già registrato su un altro account.`);
