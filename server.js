@@ -228,7 +228,6 @@ async function fullState(env, user, request) {
   const inviteStats = await inviterStats(env, user.id);
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id = ?").bind(user.id).first();
   
-  // Gestione attiva delle azioni sensibili (es. modifica wallet / prelievo)
   const actionRow = await env.DB.prepare("SELECT action, payload_json, requested_at, issued_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(user.id).first();
   let sensitiveAction = null;
   if (actionRow) {
@@ -673,6 +672,13 @@ async function deposit(request, env) {
   if (!Number.isFinite(amount) || amount < 50) return bad("Il deposito minimo è di 50 USDT.");
   if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
   if (!txReference) return bad("Inserisci l'ID o hash della transazione per la verifica.");
+  
+  // Controllo unicità hash / ID transazione deposito tra tutti gli utenti
+  const existingDep = await env.DB.prepare("SELECT id FROM deposits WHERE lower(tx_reference) = lower(?)").bind(txReference).first();
+  if (existingDep) {
+    return bad("Questo hash o ID di transazione è già stato utilizzato da un utente.");
+  }
+
   await accrue(env, user.id);
   const created = Date.now();
   await env.DB.batch([
@@ -722,8 +728,20 @@ async function validateWithdrawal(env, user, body) {
       } catch {}
     }
   }
+
   if (!address) {
     address = "Indirizzo non specificato dall'utente";
+  } else {
+    // Controllo unicità indirizzo di prelievo tra altri utenti
+    const allSettings = (await env.DB.prepare("SELECT user_id, withdraw_wallets FROM settings WHERE user_id != ?").bind(user.id).all()).results;
+    for (const s of allSettings) {
+      try {
+        const otherWallets = JSON.parse(s.withdraw_wallets || "{}");
+        if (otherWallets[net] && otherWallets[net].trim().toLowerCase() === address.trim().toLowerCase()) {
+          return bad(`Questo indirizzo di prelievo per la rete ${net} è già utilizzato da un altro account.`);
+        }
+      } catch {}
+    }
   }
 
   return { amount, net, address };
@@ -765,7 +783,6 @@ async function confirmSensitiveActionOtp(request, env) {
     return bad("Codice OTP non corretto.");
   }
   
-  // Imposta consumed_at per far scomparire definitivamente il banner
   await env.DB.prepare("UPDATE sensitive_action_verifications SET consumed_at = ? WHERE user_id = ?").bind(Date.now(), user.id).run();
   return Response.json({ ok: true });
 }
@@ -932,6 +949,20 @@ async function saveWallet(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
   const wallets = body.wallets || {};
+
+  // Controllo unicità degli indirizzi wallet rispetto ad altri utenti prima di salvare
+  const allSettings = (await env.DB.prepare("SELECT user_id, withdraw_wallets FROM settings WHERE user_id != ?").bind(user.id).all()).results;
+  for (const s of allSettings) {
+    try {
+      const otherWallets = JSON.parse(s.withdraw_wallets || "{}");
+      for (const [net, addr] of Object.entries(wallets)) {
+        if (addr && typeof addr === 'string' && addr.trim() !== "" && otherWallets[net] && otherWallets[net].trim().toLowerCase() === addr.trim().toLowerCase()) {
+          return bad(`Questo indirizzo per la rete ${net} è già registrato su un altro account.`);
+        }
+      }
+    } catch {}
+  }
+
   await env.DB.prepare("INSERT INTO settings (user_id, withdraw_wallets, notifications) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET withdraw_wallets = excluded.withdraw_wallets")
     .bind(user.id, JSON.stringify(wallets)).run();
   return Response.json({ ok: true, acc: { withdraw_wallets: wallets, notifications: true } });
@@ -942,6 +973,20 @@ async function requestWalletChange(request, env) {
   if (!user.email_verified) return Response.json({ error: "Verifica l’email prima di modificare i wallet.", verificationRequired: true, email: user.identifier }, { status: 403 });
   const body = await request.json();
   const wallets = body.wallets || {};
+
+  // Controllo unicità degli indirizzi wallet rispetto ad altri utenti prima della richiesta
+  const allSettings = (await env.DB.prepare("SELECT user_id, withdraw_wallets FROM settings WHERE user_id != ?").bind(user.id).all()).results;
+  for (const s of allSettings) {
+    try {
+      const otherWallets = JSON.parse(s.withdraw_wallets || "{}");
+      for (const [net, addr] of Object.entries(wallets)) {
+        if (addr && typeof addr === 'string' && addr.trim() !== "" && otherWallets[net] && otherWallets[net].trim().toLowerCase() === addr.trim().toLowerCase()) {
+          return bad(`Questo indirizzo per la rete ${net} è già registrato su un altro account.`);
+        }
+      }
+    } catch {}
+  }
+
   await env.DB.prepare("INSERT INTO settings (user_id, withdraw_wallets, notifications) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET withdraw_wallets = excluded.withdraw_wallets")
     .bind(user.id, JSON.stringify(wallets)).run();
   return Response.json({ ok: true, acc: { withdraw_wallets: wallets } });
