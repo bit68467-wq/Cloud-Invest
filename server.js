@@ -1048,6 +1048,7 @@ async function saveWallet(request, env) {
   for (const [net, addr] of Object.entries(wallets)) {
     const trimmedAddr = String(addr || "").trim();
     if (trimmedAddr !== "") {
+      // Blocca la modifica diretta se la rete ha già un indirizzo diverso
       if (currentWallets[net] && currentWallets[net].trim().toLowerCase() !== trimmedAddr.toLowerCase()) {
         return bad(`Hai già un indirizzo registrato per la rete ${net}. Non puoi modificarlo direttamente; utilizza la funzione di richiesta modifica.`);
       }
