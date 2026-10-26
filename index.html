@@ -10,7 +10,7 @@
 <body>
   <div class="app">
 
-    <!-- ==================== P U B L I C   H O M E (MOBILE LANDING) ==================== -->
+    <!-- ==================== P U B L I C   H O M E (WEBSIM STYLE) ==================== -->
     <main class="public-home" id="publicHome">
       <div class="public-wrap">
         <header class="public-nav">
@@ -19,71 +19,102 @@
           </a>
           <div class="public-actions">
             <button class="public-login" type="button" data-auth="login">Accedi</button>
-            <button class="public-join" type="button" data-auth="register">Registrati</button>
           </div>
         </header>
 
-        <!-- Hero con immagine a tutto sfondo e testo sovrapposto -->
-        <section class="public-hero" id="top" style="background-image: url('1000086002.png');">
+        <!-- HERO IMMERSIVA CON ARCHITETTURA -->
+        <section class="public-hero" id="top" style="background-image: url('1000086000_2.png');">
           <div class="public-hero-overlay"></div>
           <div class="public-hero-copy">
-            <span class="eyebrow"><i></i> Piattaforma digitale</span>
-            <h1>Una visione più chiara del tuo percorso.</h1>
-            <p>Uno spazio digitale per esplorare piani, seguire i movimenti e tenere sotto controllo il tuo saldo in mobilità.</p>
+            <span class="eyebrow">• PIATTAFORMA DIGITALE</span>
+            <h1>Una visione più chiara del <em>tuo percorso.</em></h1>
+            <p>Uno spazio digitale per esplorare piani, seguire i movimenti e tenere sotto controllo il tuo saldo.</p>
             <div class="public-hero-actions">
-              <button class="public-join btn-primary" type="button" data-auth="register">Inizia subito</button>
-              <button class="public-login btn-mini" type="button" data-auth="login" style="width:100%; margin-top:8px;">Ho già un account</button>
+              <button class="public-join btn-primary" type="button" data-auth="register">Inizia da qui ↗</button>
+              <button class="public-login btn-ghost" type="button" data-auth="login" style="color:var(--text); border:1px solid var(--line); border-radius:12px; padding:12px; width:100%; margin-top:8px; background:rgba(0,0,0,0.4); font-weight:600;">Scopri il progetto ↓</button>
             </div>
           </div>
+          <div class="hero-counter"><span>01</span> ——— <span>03</span></div>
         </section>
 
-        <!-- Intro con immagine a tutto sfondo e testo sovrapposto -->
-        <section class="public-intro" id="about" style="background-image: url('1000086000_2.png');">
-          <div class="public-intro-overlay"></div>
-          <div class="public-intro-content">
-            <div class="intro-label"><span>01 / IL PROGETTO</span></div>
-            <h2>La finanza digitale, <em>senza perdere il filo.</em></h2>
-            <p class="intro-desc">You3invest raccoglie in un unico ambiente mobile gli strumenti per esplorare piani, consultare l’andamento e gestire le richieste del tuo account.</p>
-            <span class="img-caption">YOU3INVEST · Visione d'insieme</span>
+        <!-- SEZIONE PROGETTO CON MARMO E BUSSOLA -->
+        <section class="public-project">
+          <div class="project-header">
+            <span class="section-kicker">01 / IL PROGETTO</span>
+            <span class="section-subkicker">YOU3INVEST</span>
+          </div>
+          <h2>La finanza digitale, <em>senza perdere il filo.</em></h2>
+          <p class="intro-desc">You3invest raccoglie in un unico ambiente gli strumenti per consultare i piani, seguire l'andamento e gestire le richieste del proprio account.</p>
+          <button class="text-link" type="button" data-auth="register" style="background:none; border:0; color:var(--accent); font-weight:700; cursor:pointer; padding:0; margin-bottom:16px; font-size:14px;">Scopri come funziona ↗</button>
+          
+          <div class="project-media" style="background-image: url('1000086002.png');">
+            <div class="img-caption">Uno spazio, una visione d'insieme. · YOU3INVEST</div>
           </div>
         </section>
 
+        <!-- SEZIONE COME FUNZIONA -->
         <section class="public-how" id="how">
-          <div class="section-kicker"><span>02 / IL PERCORSO</span></div>
+          <div class="project-header">
+            <span class="section-kicker">02 / IL PERCORSO</span>
+            <span class="section-subkicker">Tre passaggi, tutti in un unico spazio.</span>
+          </div>
           <h2>Come funziona</h2>
+          <p class="intro-desc" style="margin-bottom:14px;">Gestisci il tuo account, consulta i piani e segui i movimenti.</p>
+          
           <div class="how-stack">
             <div class="how-card">
-              <span class="how-number">01</span>
-              <div>
-                <h3>Crea il tuo account</h3>
-                <p>Accedi a un’area personale protetta con saldo e profilo.</p>
+              <div class="how-top" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span class="how-number">01</span>
+                <span style="color:var(--accent); font-size:14px;">↗</span>
               </div>
+              <h3>Crea il tuo account</h3>
+              <p>Accedi a un'area personale protetta con saldo, profilo e riepilogo delle attività.</p>
             </div>
             <div class="how-card">
-              <span class="how-number">02</span>
-              <div>
-                <h3>Esplora i piani</h3>
-                <p>Consulta durata e parametri dei piani di investimento disponibili.</p>
+              <div class="how-top" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span class="how-number">02</span>
+                <span style="color:var(--muted); font-size:14px;">⏱</span>
               </div>
+              <h3>Esplora i piani</h3>
+              <p>Consulta la durata e i parametri dei piani disponibili.</p>
             </div>
             <div class="how-card">
-              <span class="how-number">03</span>
-              <div>
-                <h3>Segui i movimenti</h3>
-                <p>Monitora posizioni attive, guadagni e richieste in tempo reale.</p>
+              <div class="how-top" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span class="how-number">03</span>
+                <span style="color:var(--muted); font-size:14px;">📈</span>
               </div>
+              <h3>Segui i movimenti</h3>
+              <p>Visualizza le posizioni, il saldo guadagni e le richieste dall'area riservata.</p>
             </div>
+          </div>
+        </section>
+
+        <!-- SEZIONE AREA PERSONALE / INTRO -->
+        <section class="public-intro" style="background-image: url('1000086000_2.png');">
+          <div class="public-intro-overlay"></div>
+          <div class="public-intro-content">
+            <span class="section-kicker" style="color:var(--accent); margin-bottom:6px; display:block;">03 / AREA PERSONALE</span>
+            <h2>Ogni informazione, <em>al suo posto.</em></h2>
+            <p class="intro-desc">Una dashboard essenziale per consultare saldo deposito, saldo guadagni, investimenti attivi e storico delle operazioni.</p>
+            <ul class="intro-list" style="list-style:none; display:flex; flex-direction:column; gap:6px; margin:12px 0 18px 0; font-size:13px; color:var(--muted);">
+              <li>01 · Riepilogo del wallet</li>
+              <li>02 · Stato degli investimenti</li>
+              <li>03 · Richieste e verifiche</li>
+            </ul>
+            <button class="public-join btn-primary" type="button" data-auth="register">Entra sulla piattaforma ↗</button>
           </div>
         </section>
 
         <section class="public-disclaimer">
-          <p>You3invest gestisce piani e rendimenti secondo le condizioni operative del servizio scelto.</p>
-          <button class="btn-primary" type="button" data-auth="register">Accedi all'area riservata</button>
+          <h3 style="font-family:Georgia,serif; font-size:16px; margin-bottom:6px;">Una nota importante</h3>
+          <p>Gli investimenti comportano rischi e i rendimenti non sono garantiti. Consulta attentamente le condizioni dei piani prima di operare.</p>
+          <button class="btn-ghost" type="button" data-auth="register" style="background:none; border:1px solid var(--line); color:var(--text); padding:12px; border-radius:12px; width:100%; font-weight:700; margin-top:8px; cursor:pointer;">Crea account ↗</button>
         </section>
 
         <footer class="public-footer">
           <span class="public-brand"><span class="logo" style="width:28px;height:28px;font-size:12px;">Y3</span> You3invest</span>
-          <p>© You3invest · Tutti i diritti riservati</p>
+          <a href="#top" style="color:var(--muted); text-decoration:none; font-size:11px; margin:6px 0;">Torna all'inizio ↑</a>
+          <p>© You3invest</p>
         </footer>
       </div>
     </main>
@@ -185,6 +216,7 @@
       </div>
     </div>
 
+    <!-- ==================== OPERATOR SCREEN ==================== -->
     <div class="appbody" id="operatorScreen" hidden>
       <header class="appbar">
         <div class="brand">
@@ -206,7 +238,7 @@
       </main>
     </div>
 
-    <!-- ==================== A P P ==================== -->
+    <!-- ==================== APP BODY (USER DASHBOARD) ==================== -->
     <div class="appbody" id="appBody" hidden>
       <header class="appbar">
         <div class="brand">
@@ -242,7 +274,7 @@
           </div>
         </section>
 
-        <!-- ==================== H O M E ==================== -->
+        <!-- HOME VIEW -->
         <section class="view active" id="view-home">
           <div class="hero">
             <p class="hello">Ciao, <b id="helloName">investitore</b></p>
@@ -309,7 +341,7 @@
           <div class="plan-list" id="homePlanList"></div>
         </section>
 
-        <!-- ==================== I N V E S T ==================== -->
+        <!-- INVEST VIEW -->
         <section class="view" id="view-invest">
           <div class="page-head">
             <h1>Investi</h1>
@@ -334,7 +366,7 @@
           </div>
         </section>
 
-        <!-- ==================== W I T H D R A W ==================== -->
+        <!-- WITHDRAW VIEW -->
         <section class="view" id="view-withdraw">
           <div class="page-head">
             <h1>Preleva guadagni</h1>
@@ -370,7 +402,7 @@
           <div id="wdHistory"></div>
         </section>
 
-        <!-- ==================== M Y ==================== -->
+        <!-- MY INVESTMENTS VIEW -->
         <section class="view" id="view-my">
           <div class="page-head">
             <h1>I miei investimenti</h1>
@@ -389,7 +421,7 @@
           <div id="historyList"></div>
         </section>
 
-        <!-- ==================== T E A M ==================== -->
+        <!-- TEAM VIEW -->
         <section class="view" id="view-team">
           <div class="page-head">
             <h1>Il mio team</h1>
@@ -417,7 +449,7 @@
           <div id="teamList" hidden></div>
         </section>
 
-        <!-- ==================== P R O F I L E ==================== -->
+        <!-- PROFILE VIEW -->
         <section class="view" id="view-profile">
           <div class="profile-card">
             <img class="avatar-lg" id="profileAvatar" src="" alt="">
