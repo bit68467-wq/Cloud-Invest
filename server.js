@@ -167,10 +167,18 @@ async function accrue(env, userId) {
     const elapsed = (now - inv.created) / DAY;
     const target = Math.min(inv.days, Math.floor(elapsed));
     if (target > inv.credited) {
+      // Rendimento giornaliero accreditato nel saldo guadagni (prelevabile)
       const gain = (inv.amount * inv.rate / 100) * (target - inv.credited);
       wallet.earnings += gain;
       wallet.total_earned += gain;
       accruedAmount += gain;
+
+      // Alla scadenza del piano, restituisce il capitale investito nel saldo guadagni (prelevabile)
+      if (target >= inv.days && inv.credited < inv.days) {
+        wallet.earnings += inv.amount;
+        accruedAmount += inv.amount;
+      }
+
       inv.credited = target;
       const active = target < inv.days - 1e-9 ? 1 : 0;
       updates.push(env.DB.prepare("UPDATE investments SET credited = ?, active = ? WHERE id = ?").bind(target, active, inv.id));
@@ -183,7 +191,7 @@ async function accrue(env, userId) {
       "ON CONFLICT(user_id) DO UPDATE SET deposit=excluded.deposit, earnings=excluded.earnings, total_deposited=excluded.total_deposited, total_earned=excluded.total_earned, total_withdrawn=excluded.total_withdrawn"
     ).bind(userId, wallet.deposit, wallet.earnings, wallet.total_deposited, wallet.total_earned, wallet.total_withdrawn), ...updates];
     if (accruedAmount > 0) statements.push(env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)")
-      .bind(userId, "Rendimenti accreditati", "Il tuo wallet è stato aggiornato: accreditati " + accruedAmount.toFixed(2) + " USDT di rendimenti.", now));
+      .bind(userId, "Rendimenti accreditati", "Il tuo wallet è stato aggiornato: accreditati " + accruedAmount.toFixed(2) + " USDT nel saldo guadagni.", now));
     await env.DB.batch(statements);
   }
   return wallet;
