@@ -741,7 +741,6 @@ async function validateWithdrawal(env, user, body) {
   if (!address) {
     address = "Indirizzo non specificato dall'utente";
   } else {
-    // Controllo unicità indirizzo basato sul registro permanente
     const existing = await env.DB.prepare("SELECT user_id FROM user_withdrawal_addresses WHERE net = ? AND lower(address) = ? AND user_id != ?").bind(net, address.trim().toLowerCase(), user.id).first();
     if (existing) {
       return bad(`Questo indirizzo di prelievo per la rete ${net} è già utilizzato da un altro account.`);
@@ -981,6 +980,14 @@ async function adminLogout(request, env) {
 
 async function saveWallet(request, env) {
   const user = await authed(request, env);
+  
+  // Verifica email richiesta solo la prima volta che l'utente salva un indirizzo di prelievo
+  const existingAddrs = await env.DB.prepare("SELECT COUNT(*) as cnt FROM user_withdrawal_addresses WHERE user_id = ?").bind(user.id).first();
+  const isFirstTime = !existingAddrs || existingAddrs.cnt === 0;
+  if (isFirstTime && !user.email_verified) {
+    return Response.json({ error: "Verifica l’email prima di salvare l’indirizzo di prelievo per la prima volta.", verificationRequired: true, email: user.identifier }, { status: 403 });
+  }
+
   const body = await request.json();
   const wallets = body.wallets || {};
 
@@ -1016,7 +1023,14 @@ async function saveWallet(request, env) {
 
 async function requestWalletChange(request, env) {
   const user = await authed(request, env);
-  if (!user.email_verified) return Response.json({ error: "Verifica l’email prima di modificare i wallet.", verificationRequired: true, email: user.identifier }, { status: 403 });
+  
+  // Verifica email richiesta solo la prima volta che l'utente salva un indirizzo di prelievo
+  const existingAddrs = await env.DB.prepare("SELECT COUNT(*) as cnt FROM user_withdrawal_addresses WHERE user_id = ?").bind(user.id).first();
+  const isFirstTime = !existingAddrs || existingAddrs.cnt === 0;
+  if (isFirstTime && !user.email_verified) {
+    return Response.json({ error: "Verifica l’email prima di salvare l’indirizzo di prelievo per la prima volta.", verificationRequired: true, email: user.identifier }, { status: 403 });
+  }
+
   const body = await request.json();
   const wallets = body.wallets || {};
 
