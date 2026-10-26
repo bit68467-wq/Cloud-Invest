@@ -234,6 +234,7 @@ async function fullState(env, user, request) {
   if (actionRow) {
     let payload = {};
     try { payload = JSON.parse(actionRow.payload_json || "{}"); } catch {}
+    // Testo aggiornato per il banner OTP (nessun link/pulsante per email, solo avviso di attesa)
     sensitiveAction = { action: actionRow.action, payload, requestedAt: actionRow.requested_at, issuedAt: actionRow.issued_at, otpExpiresAt: actionRow.otp_expires_at };
   }
   let withdraw_wallets = {};
@@ -542,7 +543,6 @@ async function setUserVerificationOtp(request, env, userId) {
   const salt = genSalt();
   const otpHash = await hash(otp, salt);
 
-  // La verifica OTP e l'invio tramite notifica gestiscono direttamente le azioni sensibili (es. prelievo)
   await env.DB.prepare(
     "UPDATE sensitive_action_verifications SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ? AND consumed_at IS NULL"
   ).bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
