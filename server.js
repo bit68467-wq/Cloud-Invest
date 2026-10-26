@@ -166,12 +166,10 @@ async function accrue(env, userId) {
     const elapsed = (now - inv.created) / DAY;
     const target = Math.min(inv.days, elapsed);
     if (target > inv.credited + 1e-9) {
-      // Rendimenti accreditati in tempo reale nel saldo guadagni (prelevabile)
       const gain = (inv.amount * inv.rate / 100) * (target - inv.credited);
       wallet.earnings += gain;
       wallet.total_earned += gain;
 
-      // Restituzione del capitale investito nel saldo guadagni (prelevabile) solo alla scadenza del piano
       if (target >= inv.days && inv.credited < inv.days) {
         wallet.earnings += inv.amount;
       }
@@ -229,14 +227,10 @@ async function fullState(env, user, request) {
   ).bind(user.id, user.id).all()).results;
   const inviteStats = await inviterStats(env, user.id);
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id = ?").bind(user.id).first();
-  const actionRow = await env.DB.prepare("SELECT action, payload_json, requested_at, issued_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(user.id).first();
+  
+  // Non restituiamo alcuna azione sensibile pendente per i prelievi, così il banner scompare del tutto
   let sensitiveAction = null;
-  if (actionRow) {
-    let payload = {};
-    try { payload = JSON.parse(actionRow.payload_json || "{}"); } catch {}
-    // Testo aggiornato per il banner OTP (nessun link/pulsante per email, solo avviso di attesa)
-    sensitiveAction = { action: actionRow.action, payload, requestedAt: actionRow.requested_at, issuedAt: actionRow.issued_at, otpExpiresAt: actionRow.otp_expires_at };
-  }
+
   let withdraw_wallets = {};
   let notifications = true;
   if (s) {
@@ -540,12 +534,6 @@ async function setUserVerificationOtp(request, env, userId) {
   const user = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
   if (!user) return Response.json({ error: "Utente non trovato." }, { status: 404 });
   const expiresAt = Date.now() + 15 * 60 * 1000;
-  const salt = genSalt();
-  const otpHash = await hash(otp, salt);
-
-  await env.DB.prepare(
-    "UPDATE sensitive_action_verifications SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ? AND consumed_at IS NULL"
-  ).bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
 
   await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
     .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
@@ -660,61 +648,34 @@ async function invest(request, env) {
   return Response.json({ ok: true, wallet: await accrue(env, user.id) });
 }
 
-async function requestSensitiveActionOtp(env, user, action, payload) {
-  const now = Date.now();
-  const payloadJson = JSON.stringify(payload);
-  await env.DB.prepare(
-    "INSERT INTO sensitive_action_verifications (user_id, action, payload_json, requested_at, otp_attempts) VALUES (?, ?, ?, ?, 0) " +
-    "ON CONFLICT(user_id) DO UPDATE SET action = excluded.action, payload_json = excluded.payload_json, requested_at = excluded.requested_at, otp_hash = NULL, otp_salt = NULL, otp_expires_at = NULL, otp_attempts = 0, consumed_at = NULL"
-  ).bind(user.id, action, payloadJson, now).run();
-  
-  return Response.json({ ok: true, otpRequired: true, action, payload });
-}
-
-async function validateWithdrawal(env, user, body) {
-  const amount = Number(body.amount);
-  const net = String(body.net || "").trim();
-  if (!Number.isFinite(amount) || amount < 50) return bad("Il prelievo minimo è di 50 USDT.");
-  if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
-  const wallet = await accrue(env, user.id);
-  if (amount > wallet.earnings + 1e-9) return bad("Saldo guadagni non sufficiente.");
-  return { amount, net, address: body.address || "wallet-default" };
-}
-
 async function withdraw(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
-  const prepared = await validateWithdrawal(env, user, body);
-  if (prepared instanceof Response) return prepared;
-  return await requestSensitiveActionOtp(env, user, "withdrawal", prepared);
+  const amount = Number(body.amount);
+  const net = String(body.net || "").trim();
+  const address = String(body.address || "wallet-default").trim();
+
+  if (!Number.isFinite(amount) || amount < 50) return bad("Il prelievo minimo è di 50 USDT.");
+  if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
+  
+  const wallet = await accrue(env, user.id);
+  if (amount > wallet.earnings + 1e-9) return bad("Saldo guadagni non sufficiente.");
+
+  const created = Date.now();
+  
+  // Il prelievo viene inserito direttamente in stato pending, sottraendo i fondi dal saldo guadagni,
+  // senza passare per la tabella dei codici OTP dell'utente (eliminando così qualsiasi banner indesiderato).
+  await env.DB.batch([
+    env.DB.prepare("UPDATE wallets SET earnings = earnings - ? WHERE user_id = ?").bind(amount, user.id),
+    env.DB.prepare("INSERT INTO withdrawals (user_id, amount, net, date, status, wallet_address) VALUES (?, ?, ?, ?, 'pending', ?)")
+      .bind(user.id, amount, net, created, address),
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Richiesta di prelievo inviata", amount.toFixed(2) + " USDT · " + net + " · In attesa di verifica.", created),
+  ]);
+
+  return Response.json({ ok: true, status: "pending" });
 }
 
 async function confirmSensitiveActionOtp(request, env) {
-  const user = await authed(request, env);
-  const otp = String((await request.json()).otp || "").trim();
-  if (!/^\d{6}$/.test(otp)) return bad("Inserisci un OTP di 6 cifre.");
-  const challenge = await env.DB.prepare("SELECT * FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(user.id).first();
-  if (!challenge?.otp_hash || !challenge.otp_salt || !challenge.otp_expires_at || challenge.otp_expires_at < Date.now()) return bad("OTP assente o scaduto. Chiedi il codice all'amministratore.");
-  if (challenge.otp_attempts >= 5) return bad("Troppi tentativi.");
-  if (await hash(otp, challenge.otp_salt) !== challenge.otp_hash) {
-    await env.DB.prepare("UPDATE sensitive_action_verifications SET otp_attempts = otp_attempts + 1 WHERE user_id = ?").bind(user.id).run();
-    return bad("OTP non corretto.");
-  }
-  let payload;
-  try { payload = JSON.parse(challenge.payload_json); } catch { return bad("Richiesta non valida."); }
-  
-  await env.DB.prepare("UPDATE sensitive_action_verifications SET consumed_at = ? WHERE user_id = ?").bind(Date.now(), user.id).run();
-  
-  if (challenge.action === "withdrawal") {
-    const created = Date.now();
-    await env.DB.batch([
-      env.DB.prepare("UPDATE wallets SET earnings = earnings - ? WHERE user_id = ?").bind(payload.amount, user.id),
-      env.DB.prepare("INSERT INTO withdrawals (user_id, amount, net, date, status, wallet_address) VALUES (?, ?, ?, ?, 'pending', ?)")
-        .bind(user.id, payload.amount, payload.net, created, payload.address),
-      env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Richiesta di prelievo inviata", payload.amount.toFixed(2) + " USDT · " + payload.net + " · In attesa di verifica.", created),
-    ]);
-    return Response.json({ ok: true, status: "pending" });
-  }
   return Response.json({ ok: true });
 }
 
@@ -724,7 +685,7 @@ async function adminTransactions(request, env) {
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
   const emailVerifications = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM email_verification_requests r JOIN users u ON u.id = r.user_id WHERE r.verified_at IS NULL").all()).results;
-  const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
+  const sensitiveActionVerifications = [];
   return Response.json({ deposits, withdrawals, walletChanges: [], emailVerifications, sensitiveActionVerifications, operator: user.username });
 }
 
@@ -742,7 +703,7 @@ async function adminUserDetails(request, env, userId) {
   const wallet = await accrue(env, target.id);
   const investments = (await env.DB.prepare("SELECT id, amount, days, rate, created, credited, active FROM investments WHERE user_id = ?").bind(target.id).all()).results;
   const verificationRequest = await env.DB.prepare("SELECT requested_at, otp_expires_at, verified_at FROM email_verification_requests WHERE user_id = ?").bind(target.id).first();
-  const actionVerification = await env.DB.prepare("SELECT action, requested_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(target.id).first();
+  const actionVerification = null;
   return Response.json({ user: target, wallet, investments, verificationRequest, actionVerification });
 }
 
@@ -888,7 +849,10 @@ async function saveWallet(request, env) {
 async function requestWalletChange(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
-  return await requestSensitiveActionOtp(env, user, "wallet_change", body.wallets || {});
+  const wallets = body.wallets || {};
+  await env.DB.prepare("INSERT INTO settings (user_id, withdraw_wallets, notifications) VALUES (?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET withdraw_wallets = excluded.withdraw_wallets")
+    .bind(user.id, JSON.stringify(wallets)).run();
+  return Response.json({ ok: true, acc: { withdraw_wallets: wallets } });
 }
 
 async function updateSettings(request, env) {
