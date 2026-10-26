@@ -21,8 +21,7 @@ const NETS = [
   { id: 'USDC',  name: 'USDC',         addr: '0xE3aC9fK2mN7qB4vD8xR5tJ1' },
 ];
 
-// ---------- State (reale, dal backend) ----------
-let state = null;   // risposta di /api/me
+let state = null;
 let token = localStorage.getItem(TOKEN_KEY);
 let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY);
 
@@ -133,7 +132,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') loadNotifications();
 });
 
-// ---------- Avatar ----------
 function avatar(name) {
   const c = encodeURIComponent((name || 'I').trim().charAt(0).toUpperCase());
   return 'data:image/svg+xml;utf8,' + `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>
@@ -141,7 +139,6 @@ function avatar(name) {
     <text x='50%' y='54%' font-size='34' fill='white' font-family='sans-serif' text-anchor='middle' dominant-baseline='middle'>${c}</text></svg>`;
 }
 
-// ---------- Session ----------
 function enterApp() {
   $('authScreen').hidden = true;
   $('operatorScreen').hidden = true;
@@ -194,7 +191,6 @@ async function logout() {
   resetAuthTabs();
 }
 
-// ---------- Navigation ----------
 const VIEWS = ['home', 'invest', 'withdraw', 'my', 'team', 'profile'];
 function go(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -213,7 +209,6 @@ document.querySelectorAll('.nav-item, [data-goto]').forEach(el => {
   el.addEventListener('click', () => go(el.dataset.goto));
 });
 
-// ---------- Render: Home ----------
 function applyIdentity() {
   const u = state.user;
   $('barName').textContent = u.username;
@@ -254,7 +249,6 @@ function renderHome() {
     </div>`).join('');
 }
 
-// ---------- Render: Invest ----------
 let activePlan = PLANS[0];
 function renderInvest() {
   const input = $('amount');
@@ -318,7 +312,6 @@ $('depositBtn').addEventListener('click', async () => {
   $('depositBtn').disabled = false;
 });
 
-// Buy plan
 $('buyBtn').addEventListener('click', async () => {
   const v = parseFloat($('amount').value) || 0;
   if (v < activePlan.min) { alert(`Importo minimo per questo piano: ${fmtC(activePlan.min)} USDT.`); return; }
@@ -338,7 +331,6 @@ $('buyBtn').addEventListener('click', async () => {
   $('buyBtn').disabled = false;
 });
 
-// ---------- Render: Withdraw ----------
 let wdNet = NETS[0];
 function renderWithdraw() {
   $('wdAvailable').textContent = fmt(state.wallet.earnings);
@@ -392,13 +384,11 @@ $('wdBtn').addEventListener('click', async () => {
   $('wdBtn').disabled = false;
 });
 
-// ---------- Render: My investments ----------
 function activeInvestments() { return state.investments.filter(i => i.active); }
 function investedActive() { return activeInvestments().reduce((a, i) => a + i.amount, 0); }
 function invCard(i) {
   const el = (Date.now() - i.created) / DAY;
   const done = Math.min(1, el / i.days);
-  const daily = i.amount * i.rate / 100;
   return `
     <div class="ln-card">
       <div class="ln-top">
@@ -433,7 +423,6 @@ function renderMy() {
   $('historyList').innerHTML = closed.map(invCard).join('');
 }
 
-// ---------- Render: Team ----------
 function renderTeam() {
   const refs = state.team || [];
   const stats = state.inviteStats || { direct: 0, second: 0, level: 0, planBonus: 0 };
@@ -507,7 +496,6 @@ function renderTeam() {
   $('teamMembersToggle').setAttribute('aria-expanded', 'false');
 }
 
-// ---------- Per-request email OTP ----------
 function sensitiveActionLabel(action) {
   return action === 'withdrawal' ? 'prelievo' : 'modifica wallet';
 }
@@ -598,7 +586,6 @@ $('actionOtpForm').addEventListener('submit', async event => {
   button.disabled = false;
 });
 
-// ---------- Team accordions ----------
 $('teamMembersToggle').addEventListener('click', () => {
   const button = $('teamMembersToggle');
   const open = button.getAttribute('aria-expanded') !== 'true';
@@ -621,7 +608,6 @@ document.addEventListener('click', event => {
   panel.hidden = !open;
 });
 
-// ---------- Copy invite ----------
 $('teamCopyLink').addEventListener('click', () => {
   const code = state.user.inviteCode;
   navigator.clipboard.writeText(code).catch(() => {
@@ -633,9 +619,7 @@ $('teamCopyLink').addEventListener('click', () => {
   b.textContent = 'Copiato';
   setTimeout(() => b.textContent = 'Copia', 1500);
 });
-$('wdRec') && $('wdRec').addEventListener('click', () => go('withdraw'));
 
-// ---------- Profile ----------
 const stateDefaults = {
   acc: { withdraw_wallets: {}, notifications: true },
   sensitiveAction: null,
@@ -694,7 +678,9 @@ async function renderAdminQueue(force = false, data = null, queueId = 'operatorQ
     ].sort((a, b) => a.date - b.date);
     const verificationItems = data.emailVerifications || [];
     const actionVerificationItems = data.sensitiveActionVerifications || [];
-    if (!items.length && !verificationItems.length && !actionVerificationItems.length) {
+    const passwordResetItems = data.passwordResets || [];
+
+    if (!items.length && !verificationItems.length && !actionVerificationItems.length && !passwordResetItems.length) {
       const empty = '<div class="empty"><p>Nessuna richiesta in attesa.</p></div>';
       if (queue.innerHTML !== empty) queue.innerHTML = empty;
       return;
@@ -710,16 +696,21 @@ async function renderAdminQueue(force = false, data = null, queueId = 'operatorQ
       return '<div class="ln-card review-card"><div class="ln-top"><b>OTP ' + action + ' · ' + escapeHTML(r.username) + '</b><span class="ln-status active">' + status + '</span></div>' +
         '<div class="ln-meta"><span>' + escapeHTML(r.identifier) + '</span><span>' + new Date(r.requested_at).toLocaleString('it-IT') + '</span></div>' +
         '<div class="review-actions"><button class="btn-mini" type="button" data-admin-user="' + escapeHTML(r.user_id) + '">Visualizza richiesta / imposta OTP</button></div></div>';
+    }).join('') + passwordResetItems.map(r => {
+      const status = r.issued_at && r.otp_expires_at > Date.now() ? 'OTP impostato' : 'In attesa OTP';
+      return '<div class="ln-card review-card"><div class="ln-top"><b>Recupero password · ' + escapeHTML(r.username) + '</b><span class="ln-status active">' + status + '</span></div>' +
+        '<div class="ln-meta"><span>' + escapeHTML(r.identifier) + '</span><span>' + new Date(r.requested_at).toLocaleString('it-IT') + '</span></div>' +
+        '<div class="review-actions"><button class="btn-mini" type="button" data-admin-user="' + escapeHTML(r.user_id) + '">Visualizza richiesta / imposta OTP</button></div></div>';
     }).join('');
+
     const markup = verificationMarkup + items.map(r => {
       const heading = r.kind === 'wallet_change' ? r.title : r.title + ' · ' + fmt(r.amount);
       let html = '<div class="ln-card review-card"><div class="ln-top"><b>' + heading + '</b><span class="ln-status active">In verifica</span></div>';
       html += '<div class="ln-meta"><span>' + escapeHTML(r.username) + ' · ' + escapeHTML(r.net) + '</span><span>' + new Date(r.date).toLocaleString('it-IT') + '</span></div>';
       if (r.kind === 'withdrawal') html += '<div class="review-address">Destinazione: ' + escapeHTML(r.wallet_address) + '</div>';
       else if (r.kind === 'wallet_change') {
-        let wallets = {};
-        try { wallets = JSON.parse(r.wallets_json || '{}'); } catch {}
-        html += '<div class="review-address">Account: ' + escapeHTML(r.identifier) + '<br>' + Object.entries(wallets).map(([net, address]) => escapeHTML(net) + ': ' + escapeHTML(address)).join('<br>') + '</div>';
+        const addrDetails = `Vecchio: ${r.old_address} -> Nuovo: ${r.new_address}`;
+        html += '<div class="review-address">Account: ' + escapeHTML(r.identifier) + '<br>Rete: ' + escapeHTML(r.net) + '<br>' + escapeHTML(addrDetails) + '</div>';
       } else html += '<div class="review-address">TX: ' + escapeHTML(r.tx_reference) + '</div>';
       html += '<div class="review-actions"><button class="btn-mini" data-review="approve" data-kind="' + r.kind + '" data-id="' + r.id + '">Approva</button><button class="btn-mini reject" data-review="reject" data-kind="' + r.kind + '" data-id="' + r.id + '">Rifiuta</button></div></div>';
       return html;
@@ -834,7 +825,17 @@ function adminActionVerificationMarkup(request) {
     : '<p class="panel-msg error">OTP da impostare.</p>';
   return '<section class="admin-verification"><h3 class="block-title">OTP per ' + action + '</h3>' +
     '<p class="admin-user-contact">Richiesto il ' + new Date(request.requested_at).toLocaleString('it-IT') + '.</p>' + details + status +
-    '<form class="admin-otp-form" id="adminOtpForm"><label for="adminOtpInput">Imposta OTP a 6 cifre</label><input id="adminOtpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required><button class="btn-primary" type="submit">Salva OTP</button><button class="btn-primary" type="submit" data-otp-notify="true">Salva e invia notifica</button><p class="panel-msg" id="adminOtpMsg" role="status"></p><a class="btn-primary mail-link" id="adminOtpEmailLink" hidden>Prepara email OTP</a></form></section>';
+    '<form class="admin-otp-form" id="adminActionOtpForm"><label for="adminActionOtpInput">Imposta OTP a 6 cifre</label><input id="adminActionOtpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required><button class="btn-primary" type="submit">Salva OTP</button><button class="btn-primary" type="submit" data-otp-notify="true">Salva e invia notifica</button><p class="panel-msg" id="adminActionOtpMsg" role="status"></p><a class="btn-primary mail-link" id="adminActionOtpEmailLink" hidden>Prepara email OTP</a></form></section>';
+}
+
+function adminPasswordResetMarkup(request) {
+  if (!request) return '';
+  const status = request.issued_at && request.otp_expires_at > Date.now()
+    ? '<p class="panel-msg">OTP impostato, valido fino alle ' + new Date(request.otp_expires_at).toLocaleTimeString('it-IT') + '.</p>'
+    : '<p class="panel-msg error">OTP da impostare.</p>';
+  return '<section class="admin-verification"><h3 class="block-title">Recupero password</h3>' +
+    '<p class="admin-user-contact">Richiesto il ' + new Date(request.requested_at).toLocaleString('it-IT') + '.</p>' + status +
+    '<form class="admin-otp-form" id="adminPasswordResetOtpForm"><label for="adminPasswordResetOtpInput">Imposta OTP a 6 cifre</label><input id="adminPasswordResetOtpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required><button class="btn-primary" type="submit">Salva OTP</button><button class="btn-primary" type="submit" data-otp-notify="true">Salva e invia notifica</button><p class="panel-msg" id="adminPasswordResetOtpMsg" role="status"></p><a class="btn-primary mail-link" id="adminPasswordResetEmailLink" hidden>Prepara email OTP</a></form></section>';
 }
 
 async function openAdminUser(userId) {
@@ -846,7 +847,7 @@ async function openAdminUser(userId) {
   try {
     const data = await api(`/api/admin/users/${encodeURIComponent(userId)}`);
     if (modal.dataset.userId !== userId) return;
-    const { user, wallet, investments, verificationRequest, actionVerification } = data;
+    const { user, wallet, investments, verificationRequest, actionVerification, passwordResetRequest } = data;
     modal.dataset.userEmail = user.identifier;
     modal.dataset.actionType = actionVerification?.action || '';
     const invested = investments.reduce((sum, item) => sum + Number(item.amount), 0);
@@ -855,6 +856,7 @@ async function openAdminUser(userId) {
       <p class="admin-user-contact">${escapeHTML(user.identifier)} · Account dal ${new Date(user.created_at).toLocaleDateString('it-IT')}</p>
       ${adminVerificationMarkup(user, verificationRequest)}
       ${adminActionVerificationMarkup(actionVerification)}
+      ${adminPasswordResetMarkup(passwordResetRequest)}
       <div class="admin-user-stats">
         <div class="stat"><span>Saldo deposito</span><b>${fmt(wallet.deposit)}</b></div>
         <div class="stat"><span>Saldo guadagni</span><b>${fmt(wallet.earnings)}</b></div>
@@ -882,7 +884,6 @@ async function openAdminUser(userId) {
   }
 }
 
-// Funzione per eliminare l'utente dal pannello amministratore
 async function deleteUser(userId) {
   if (!confirm("Sei sicuro di voler eliminare definitivamente questo utente e tutti i suoi dati (wallet, depositi, prelievi, investimenti)? L'operazione è irreversibile.")) {
     return;
@@ -891,8 +892,6 @@ async function deleteUser(userId) {
     await api(`/api/admin/users/${encodeURIComponent(userId)}/delete`, { method: 'POST' });
     alert("Utente eliminato con successo.");
     $('adminUserModal').hidden = true;
-    
-    // Aggiorna le liste utenti aperte se visibili
     if (!$('operatorUsersSection').hidden) {
       await toggleAdminUsers('operatorUsersSection', 'operatorUsersList', 'operatorUsersToggle');
       await toggleAdminUsers('operatorUsersSection', 'operatorUsersList', 'operatorUsersToggle');
@@ -907,7 +906,6 @@ async function deleteUser(userId) {
   }
 }
 
-// Event listener per il pulsante elimina utente nella modale
 $('adminDeleteUserBtn')?.addEventListener('click', async () => {
   const userId = $('adminUserModal').dataset.userId;
   if (!userId) return;
@@ -925,14 +923,15 @@ document.addEventListener('keydown', e => {
     $('actionOtpModal').hidden = true;
   }
 });
+
 document.addEventListener('submit', async e => {
-  if (e.target.id === 'adminOtpForm') {
+  if (e.target.id === 'adminOtpForm' || e.target.id === 'adminActionOtpForm') {
     e.preventDefault();
     const form = e.target;
     const buttons = [...form.querySelectorAll('button[type="submit"]')];
     const button = e.submitter || buttons[0];
     const notify = button.dataset.otpNotify === 'true';
-    const msg = $('adminOtpMsg');
+    const msg = form.querySelector('.panel-msg');
     const userId = $('adminUserModal').dataset.userId;
     const email = $('adminUserModal').dataset.userEmail;
     const otp = form.elements.otp.value.trim();
@@ -945,13 +944,15 @@ document.addEventListener('submit', async e => {
       const actionType = $('adminUserModal').dataset.actionType;
       const actionLabel = actionType === 'withdrawal' ? 'richiesta di prelievo' : actionType === 'wallet_change' ? 'modifica del wallet' : 'verifica email';
       const body = 'Il tuo codice OTP per autorizzare la ' + actionLabel + ' è: ' + otp + '\n\nIl codice scade alle ' + expiry.toLocaleString('it-IT') + '. Se non hai richiesto questa operazione, contatta il supporto.';
-      const link = $('adminOtpEmailLink');
+      const link = form.querySelector('.mail-link');
       if (notify) {
-        link.hidden = true;
+        if (link) link.hidden = true;
         msg.textContent = 'OTP inviato nella campana notifiche dell’utente. Valido per 15 minuti.';
       } else {
-        link.href = 'mailto:' + email + '?subject=' + encodeURIComponent('Codice OTP ' + actionLabel) + '&body=' + encodeURIComponent(body);
-        link.hidden = false;
+        if (link) {
+          link.href = 'mailto:' + email + '?subject=' + encodeURIComponent('Codice OTP ' + actionLabel) + '&body=' + encodeURIComponent(body);
+          link.hidden = false;
+        }
         msg.textContent = 'OTP salvato. Ora prepara e invia manualmente l’email all’utente.';
       }
       buttons.forEach(item => { item.disabled = false; });
@@ -962,6 +963,44 @@ document.addEventListener('submit', async e => {
     }
     return;
   }
+
+  if (e.target.id === 'adminPasswordResetOtpForm') {
+    e.preventDefault();
+    const form = e.target;
+    const buttons = [...form.querySelectorAll('button[type="submit"]')];
+    const button = e.submitter || buttons[0];
+    const notify = button.dataset.otpNotify === 'true';
+    const msg = $('adminPasswordResetOtpMsg');
+    const userId = $('adminUserModal').dataset.userId;
+    const email = $('adminUserModal').dataset.userEmail;
+    const otp = form.elements.otp.value.trim();
+    buttons.forEach(item => { item.disabled = true; });
+    msg.textContent = notify ? 'Invio notifica OTP…' : 'Salvataggio OTP…';
+    msg.classList.remove('error');
+    try {
+      const result = await api('/api/admin/users/' + encodeURIComponent(userId) + '/password-reset-otp', { method: 'POST', body: JSON.stringify({ otp, notify }) });
+      const expiry = new Date(result.expiresAt);
+      const body = 'Il tuo codice OTP per il recupero della password è: ' + otp + '\n\nIl codice scade alle ' + expiry.toLocaleString('it-IT') + '. Se non hai richiesto questa operazione, contatta il supporto.';
+      const link = $('adminPasswordResetEmailLink');
+      if (notify) {
+        if (link) link.hidden = true;
+        msg.textContent = 'OTP inviato nella campana notifiche dell’utente. Valido per 15 minuti.';
+      } else {
+        if (link) {
+          link.href = 'mailto:' + email + '?subject=' + encodeURIComponent('Codice OTP recupero password') + '&body=' + encodeURIComponent(body);
+          link.hidden = false;
+        }
+        msg.textContent = 'OTP salvato. Ora prepara e invia manualmente l’email all’utente.';
+      }
+      buttons.forEach(item => { item.disabled = false; });
+    } catch (err) {
+      msg.textContent = err.message;
+      msg.classList.add('error');
+      buttons.forEach(item => { item.disabled = false; });
+    }
+    return;
+  }
+
   if (e.target.id !== 'adminBalanceForm') return;
   e.preventDefault();
   const form = e.target;
@@ -1020,9 +1059,6 @@ function renderProfile(updatePanels = true) {
   if (updatePanels && !editing && !$('histPanel').hidden) renderHistPanel();
 }
 
-function accWallet() { return acc().withdraw_wallets || {}; }
-
-// Toggle panels
 document.querySelectorAll('.acc-row').forEach(row => {
   row.addEventListener('click', () => {
     const panel = $(row.dataset.panel);
@@ -1036,7 +1072,6 @@ document.querySelectorAll('.acc-row').forEach(row => {
   });
 });
 
-// Save wallets
 document.addEventListener('click', async e => {
   if (e.target.id !== 'saveWallets') return;
   const wallets = {};
@@ -1068,7 +1103,6 @@ document.addEventListener('click', async e => {
   }
 });
 
-// Notifications toggle
 $('notifSwitch').addEventListener('click', async () => {
   const next = !acc().notifications;
   const s = $('notifSwitch');
@@ -1077,7 +1111,6 @@ $('notifSwitch').addEventListener('click', async () => {
   catch (err) { alert(err.message); setNotifSwitch(); }
 });
 
-// Change password
 $('pwSave').addEventListener('click', async () => {
   const cur = $('pwCur').value;
   const nw = $('pwNew').value;
@@ -1097,7 +1130,7 @@ $('pwSave').addEventListener('click', async () => {
   $('pwSave').disabled = false;
 });
 
-// ---------- Auth (registrazione / login / verifica per prelievi) ----------
+// ---------- Gestione Auth / Password Dimenticata ----------
 let verificationReturnView = '';
 function hideAuthMsg() { const m = $('authMsg'); m.hidden = true; m.textContent = ''; }
 function resetAuthTabs() {
@@ -1105,6 +1138,8 @@ function resetAuthTabs() {
   $('tabLogin').hidden = false;
   $('tabRegister').hidden = false;
   $('verificationPanel').hidden = true;
+  $('passwordRecoveryPanel').hidden = true;
+  $('authTabsContainer').hidden = false;
   $('tabLogin').classList.add('active');
   $('tabRegister').classList.remove('active');
   $('loginForm').hidden = false;
@@ -1112,6 +1147,59 @@ function resetAuthTabs() {
   $('verificationRequestMsg').textContent = '';
   $('requestEmailLink').hidden = true;
 }
+
+$('forgotPasswordBtn').addEventListener('click', () => {
+  hideAuthMsg();
+  $('tabLogin').hidden = true;
+  $('tabRegister').hidden = true;
+  $('authTabsContainer').hidden = true;
+  $('loginForm').hidden = true;
+  $('registerForm').hidden = true;
+  $('verificationPanel').hidden = true;
+  $('passwordRecoveryPanel').hidden = false;
+  $('recoveryEmail').value = '';
+  $('recoveryRequestErr').textContent = '';
+  $('recoveryConfirmErr').textContent = '';
+  $('recoveryRequestMsg').textContent = '';
+  $('recoveryEmailLink').hidden = true;
+  $('recoveryConfirmForm').hidden = true;
+});
+
+$('recoveryBack').addEventListener('click', resetAuthTabs);
+
+$('recoveryRequestForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('recoveryEmail').value.trim().toLowerCase();
+  const error = $('recoveryRequestErr');
+  const link = $('recoveryEmailLink');
+  error.textContent = '';
+  link.hidden = true;
+  try {
+    const data = await api('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+    const body = 'Richiesta recupero password\nEmail account: ' + data.email + '\nData richiesta: ' + new Date(data.requestedAt).toLocaleString('it-IT') + '\n\nRichiedo l’invio di un codice OTP per reimpostare la mia password.';
+    link.href = 'mailto:info.cup9@yahoo.com?subject=' + encodeURIComponent('Richiesta OTP recupero password') + '&body=' + encodeURIComponent(body);
+    link.hidden = false;
+    $('recoveryRequestMsg').textContent = 'Richiesta registrata nel pannello operatore. Invia la mail e attendi l’emissione del codice OTP.';
+    $('recoveryConfirmForm').hidden = false;
+  } catch (err) { error.textContent = err.message; }
+});
+
+$('recoveryConfirmForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const error = $('recoveryConfirmErr');
+  error.textContent = '';
+  const email = $('recoveryEmail').value.trim().toLowerCase();
+  const otp = $('recoveryOtp').value.trim();
+  const newPassword = $('recoveryNewPass').value;
+  if (newPassword.length < 6) { error.textContent = 'La password deve avere almeno 6 caratteri.'; return; }
+  try {
+    const result = await api('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, otp, newPassword }) });
+    alert(result.message || 'Password reimpostata con successo. Ora puoi effettuare il login.');
+    resetAuthTabs();
+    $('loginId').value = email;
+  } catch (err) { error.textContent = err.message; }
+});
+
 function showVerification(email, password = '', account = '', returnView = '') {
   verificationReturnView = returnView;
   if (returnView) {
@@ -1122,6 +1210,7 @@ function showVerification(email, password = '', account = '', returnView = '') {
   hideAuthMsg();
   $('tabLogin').hidden = true;
   $('tabRegister').hidden = true;
+  $('authTabsContainer').hidden = true;
   $('loginForm').hidden = true;
   $('registerForm').hidden = true;
   $('verificationPanel').hidden = false;
@@ -1244,10 +1333,8 @@ $('loginForm').addEventListener('submit', async (e) => {
   }
 });
 
-// Logout (i dati restano salvati, mai cancellati)
 $('logoutBtn').addEventListener('click', () => logout());
 
-// ---------- Boot ----------
 (async function boot() {
   if (adminToken) {
     try {
@@ -1273,7 +1360,6 @@ $('logoutBtn').addEventListener('click', () => logout());
   $('appBody').hidden = true;
 })();
 
-// Aggiornamento in tempo reale (dati sempre aggiornati dal server)
 setInterval(async () => {
   if (adminToken && !$('operatorScreen').hidden && document.visibilityState === 'visible') {
     await renderAdminQueue();
