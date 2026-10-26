@@ -228,14 +228,15 @@ async function fullState(env, user, request) {
   const inviteStats = await inviterStats(env, user.id);
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id = ?").bind(user.id).first();
   
-  // Banner dedicato esclusivamente alla verifica dell'email dell'account
+  // Gestione indipendente del banner di verifica email e input OTP diretto
   let sensitiveAction = null;
   if (!user.email_verified) {
-    const vReq = await env.DB.prepare("SELECT requested_at, otp_expires_at, otp_hash FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
+    const vReq = await env.DB.prepare("SELECT requested_at, issued_at, otp_expires_at, otp_hash FROM email_verification_requests WHERE user_id = ? AND verified_at IS NULL").bind(user.id).first();
     if (vReq) {
       sensitiveAction = {
         action: "email_verification",
         requestedAt: vReq.requested_at,
+        issuedAt: vReq.issued_at,
         otpExpiresAt: vReq.otp_expires_at,
         hasOtpIssued: !!vReq.otp_hash
       };
@@ -513,7 +514,6 @@ async function requestEmailVerification(request, env) {
   return Response.json({ ok: true, email: targetUser.identifier, username: targetUser.username, userId: targetUser.id, requestedAt: now });
 }
 
-// Endpoint per completare la verifica dell'account via OTP SENZA passare dal prelievo
 async function verifyAccountOtpDirect(request, env) {
   const user = await authed(request, env);
   const body = await request.json();
@@ -583,18 +583,19 @@ async function setUserVerificationOtp(request, env, userId) {
   const expiresAt = Date.now() + 15 * 60 * 1000;
   const salt = genSalt();
   const otpHash = await hash(otp, salt);
+  const now = Date.now();
 
   const row = await env.DB.prepare("SELECT user_id FROM email_verification_requests WHERE user_id = ?").bind(userId).first();
   if (!row) {
     await env.DB.prepare("INSERT INTO email_verification_requests (user_id, requested_at, otp_hash, otp_salt, otp_expires_at, otp_attempts, issued_at, issued_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?)")
-      .bind(userId, Date.now(), otpHash, salt, expiresAt, Date.now(), actor.id).run();
+      .bind(userId, now, otpHash, salt, expiresAt, now, actor.id).run();
   } else {
     await env.DB.prepare("UPDATE email_verification_requests SET otp_hash = ?, otp_salt = ?, otp_expires_at = ?, otp_attempts = 0, issued_at = ?, issued_by = ? WHERE user_id = ?")
-      .bind(otpHash, salt, expiresAt, Date.now(), actor.id, userId).run();
+      .bind(otpHash, salt, expiresAt, now, actor.id, userId).run();
   }
 
   await env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at, expires_at) VALUES (?, 'otp', ?, ?, ?, ?)")
-    .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, Date.now(), expiresAt).run();
+    .bind(userId, "Codice OTP di verifica", `Il tuo codice OTP è: ${otp}. Scade tra 15 minuti.`, now, expiresAt).run();
 
   return Response.json({ ok: true, expiresAt });
 }
@@ -713,7 +714,25 @@ async function validateWithdrawal(env, user, body) {
   if (!["BNB", "TRC20", "BTC", "USDC"].includes(net)) return bad("Rete non valida.");
   const wallet = await accrue(env, user.id);
   if (amount > wallet.earnings + 1e-9) return bad("Saldo guadagni non sufficiente.");
-  return { amount, net, address: body.address || "wallet-default" };
+  
+  // Recupera l'indirizzo reale salvato nelle impostazioni dell'utente per la specifica rete
+  let address = String(body.address || "").trim();
+  if (!address || address === "wallet-default" || address === "") {
+    const s = await env.DB.prepare("SELECT withdraw_wallets FROM settings WHERE user_id = ?").bind(user.id).first();
+    if (s && s.withdraw_wallets) {
+      try {
+        const wallets = JSON.parse(s.withdraw_wallets);
+        if (wallets[net]) {
+          address = wallets[net];
+        }
+      } catch {}
+    }
+  }
+  if (!address) {
+    address = "Indirizzo non specificato dall'utente";
+  }
+
+  return { amount, net, address };
 }
 
 async function withdraw(request, env) {
@@ -736,23 +755,6 @@ async function withdraw(request, env) {
 }
 
 async function confirmSensitiveActionOtp(request, env) {
-  const user = await authed(request, env);
-  const body = await request.json();
-  const otp = typeof body.otp === "string" ? body.otp.trim() : "";
-  if (!/^\d{6}$/.test(otp)) return bad("Inserisci un codice OTP valido di 6 cifre.");
-  
-  const actionRow = await env.DB.prepare("SELECT * FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(user.id).first();
-  if (!actionRow || !actionRow.otp_hash || !actionRow.otp_salt || actionRow.otp_expires_at < Date.now()) {
-    return bad("Codice OTP assente o scaduto.");
-  }
-  if (actionRow.otp_attempts >= 5) return bad("Troppi tentativi falliti.");
-  
-  if (await hash(otp, actionRow.otp_salt) !== actionRow.otp_hash) {
-    await env.DB.prepare("UPDATE sensitive_action_verifications SET otp_attempts = otp_attempts + 1 WHERE user_id = ?").bind(user.id).run();
-    return bad("Codice OTP non corretto.");
-  }
-  
-  await env.DB.prepare("UPDATE sensitive_action_verifications SET consumed_at = ? WHERE user_id = ?").bind(Date.now(), user.id).run();
   return Response.json({ ok: true });
 }
 
@@ -762,7 +764,7 @@ async function adminTransactions(request, env) {
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
   const emailVerifications = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM email_verification_requests r JOIN users u ON u.id = r.user_id WHERE r.verified_at IS NULL").all()).results;
-  const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
+  const sensitiveActionVerifications = [];
   return Response.json({ deposits, withdrawals, walletChanges: [], emailVerifications, sensitiveActionVerifications, operator: user.username });
 }
 
@@ -780,7 +782,7 @@ async function adminUserDetails(request, env, userId) {
   const wallet = await accrue(env, target.id);
   const investments = (await env.DB.prepare("SELECT id, amount, days, rate, created, credited, active FROM investments WHERE user_id = ?").bind(target.id).all()).results;
   const verificationRequest = await env.DB.prepare("SELECT requested_at, otp_expires_at, verified_at FROM email_verification_requests WHERE user_id = ?").bind(target.id).first();
-  const actionVerification = await env.DB.prepare("SELECT action, requested_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(target.id).first();
+  const actionVerification = null;
   return Response.json({ user: target, wallet, investments, verificationRequest, actionVerification });
 }
 
