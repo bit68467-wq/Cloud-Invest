@@ -241,7 +241,7 @@ async function fullState(env, user, request) {
     notifications = !!s.notifications;
   }
   return {
-    user: { id: user.id, username: user.username, identifier: user.identifier, inviteCode: user.invite_code, referredBy: user.referred_by, emailVerified: user.email_verified },
+    user: { id: user.id, username: user.username, identifier: user.identifier, inviteCode: user.invite_code, referredBy: user.referred_by, emailVerified: user.email_verified, isOperator: !!user.is_operator },
     wallet,
     investments,
     deposits,
@@ -250,7 +250,7 @@ async function fullState(env, user, request) {
     inviteStats,
     acc: { withdraw_wallets, notifications },
     sensitiveAction,
-    isOperator: !!(await adminSessionUser(request, env)),
+    isOperator: !!(await adminSessionUser(request, env)) || !!user.is_operator,
     isOwner: false,
     isOwnerAccount: false,
   };
@@ -271,7 +271,8 @@ const workerHandler = {
         invite_code TEXT NOT NULL,
         referred_by TEXT,
         created_at INTEGER NOT NULL,
-        email_verified INTEGER NOT NULL DEFAULT 0
+        email_verified INTEGER NOT NULL DEFAULT 0,
+        is_operator INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -422,10 +423,11 @@ const workerHandler = {
       adminUserId = makeToken();
       const salt = genSalt();
       const ph = await hash(adminEmail, salt);
-      await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)")
+      await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, is_operator, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)")
         .bind(adminUserId, "h9invest", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
     } else {
       adminUserId = adminUser.id;
+      await env.DB.prepare("UPDATE users SET is_operator = 1 WHERE id = ?").bind(adminUserId).run();
     }
     
     const saltAdmin = genSalt();
@@ -462,11 +464,16 @@ const workerHandler = {
       if (method === "POST" && pathName === "/api/wallet-change-request") return await requestWalletChange(request, env);
       if (method === "POST" && pathName === "/api/settings") return await updateSettings(request, env);
       if (method === "POST" && pathName === "/api/change-password") return await changePassword(request, env);
+      
       if (method === "GET" && pathName === "/api/admin/transactions") return await adminTransactions(request, env);
       if (method === "GET" && pathName === "/api/admin/users") return await adminUsers(request, env);
+      if (method === "GET" && pathName === "/api/admin/stats") return await adminStats(request, env);
       
       const adminUserMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)$/);
       if (method === "GET" && adminUserMatch) return await adminUserDetails(request, env, adminUserMatch[1]);
+      
+      const adminOperatorToggleMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/toggle-operator$/);
+      if (method === "POST" && adminOperatorToggleMatch) return await adminToggleOperator(request, env, adminOperatorToggleMatch[1]);
       
       const adminOtpMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/verification-otp$/);
       if (method === "POST" && adminOtpMatch) return await setUserVerificationOtp(request, env, adminOtpMatch[1]);
@@ -514,7 +521,7 @@ async function register(request, env) {
   const s = genSalt();
   const inviteCode = "H9-" + username.slice(0, 4).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
   const ph = await hash(password, s);
-  await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, referred_by, created_at, email_verified) VALUES (?,?,?,?,?,?,?,?,0)")
+  await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, referred_by, created_at, email_verified, is_operator) VALUES (?,?,?,?,?,?,?,?,0,0)")
     .bind(id, username, email, ph, s, inviteCode, referredBy, Date.now()).run();
   return Response.json({ ok: true, email, username });
 }
@@ -740,7 +747,9 @@ async function login(request, env) {
   if (userPasswordValid) {
     const token = makeToken();
     await env.DB.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)").bind(token, user.id, Date.now()).run();
-    return Response.json({ ok: true, mode: "user", token });
+    // Se l'utente è designato come operatore nel database, restituiamo la modalità operator
+    const mode = user.is_operator ? "operator" : "user";
+    return Response.json({ ok: true, mode, token });
   }
   if (!user) return Response.json({ error: "Account non trovato. Registrati prima di accedere." }, { status: 400 });
   return Response.json({ error: "Password non corretta." }, { status: 400 });
@@ -829,7 +838,6 @@ async function invest(request, env) {
   const stats = await inviterStats(env, user.id);
   const finalRate = plan.rate + (stats.planBonus || 0);
 
-  // Modifica per consentire l'utilizzo del saldo guadagni (e/o deposito) per i nuovi investimenti
   let deductDeposit = 0;
   let deductEarnings = 0;
 
@@ -924,9 +932,18 @@ async function confirmSensitiveActionOtp(request, env) {
   return Response.json({ ok: true });
 }
 
+async function verifyOperatorAccess(request, env) {
+  const adminActorUser = await adminActor(request, env);
+  if (adminActorUser) return adminActorUser;
+  const sessionUserObj = await sessionUser(request, env);
+  if (sessionUserObj && sessionUserObj.is_operator) return sessionUserObj;
+  return null;
+}
+
 async function adminTransactions(request, env) {
-  const user = await adminActor(request, env);
-  if (!user) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  
   const deposits = (await env.DB.prepare("SELECT d.*, u.username FROM deposits d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.date ASC").all()).results;
   const withdrawals = (await env.DB.prepare("SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = 'pending' ORDER BY w.date ASC").all()).results;
   
@@ -961,45 +978,126 @@ async function adminTransactions(request, env) {
   const sensitiveActionVerifications = (await env.DB.prepare("SELECT r.user_id, r.action, r.requested_at, r.otp_expires_at, u.username, u.identifier FROM sensitive_action_verifications r JOIN users u ON u.id = r.user_id WHERE r.consumed_at IS NULL").all()).results;
   const passwordResets = (await env.DB.prepare("SELECT r.user_id, r.requested_at, r.otp_expires_at, r.issued_at, u.username, u.identifier FROM password_reset_requests r JOIN users u ON u.id = r.user_id").all()).results;
 
-  return Response.json({ deposits, withdrawals, walletChanges, emailVerifications, sensitiveActionVerifications, passwordResets, operator: user.username });
+  return Response.json({ deposits, withdrawals, walletChanges, emailVerifications, sensitiveActionVerifications, passwordResets, operator: operator.username });
 }
 
 async function adminUsers(request, env) {
-  const user = await adminActor(request, env);
-  if (!user) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
-  const users = (await env.DB.prepare("SELECT id, username, identifier, created_at, email_verified FROM users ORDER BY created_at DESC").all()).results;
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  
+  const urlObj = new URL(request.url);
+  const searchEmail = (urlObj.searchParams.get("search") || "").trim().toLowerCase();
+
+  let query = "SELECT id, username, identifier, created_at, email_verified, is_operator FROM users";
+  let params = [];
+  if (searchEmail) {
+    query += " WHERE lower(identifier) LIKE ? OR lower(username) LIKE ?";
+    params = [`%${searchEmail}%`, `%${searchEmail}%`];
+  }
+  query += " ORDER BY created_at DESC";
+
+  const users = (await env.DB.prepare(query).bind(...params).all()).results;
   return Response.json({ users });
 }
 
+async function adminStats(request, env) {
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+
+  const totalUsersRes = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first();
+  const totalDepositsRes = await env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM deposits WHERE status = 'approved'").first();
+  const totalWithdrawalsRes = await env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM withdrawals WHERE status = 'approved'").first();
+  const totalInvestmentsRes = await env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM investments").first();
+  const totalEarningsRes = await env.DB.prepare("SELECT COALESCE(SUM(earnings), 0) as total, COALESCE(SUM(total_earned), 0) as historical FROM wallets").first();
+
+  return Response.json({
+    totalUsers: totalUsersRes?.count || 0,
+    deposits: {
+      count: totalDepositsRes?.count || 0,
+      total: totalDepositsRes?.total || 0
+    },
+    withdrawals: {
+      count: totalWithdrawalsRes?.count || 0,
+      total: totalWithdrawalsRes?.total || 0
+    },
+    investments: {
+      count: totalInvestmentsRes?.count || 0,
+      total: totalInvestmentsRes?.total || 0
+    },
+    earnings: {
+      current: totalEarningsRes?.total || 0,
+      historical: totalEarningsRes?.historical || 0
+    }
+  });
+}
+
 async function adminUserDetails(request, env, userId) {
-  const actor = await adminActor(request, env);
-  if (!actor) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
-  const target = await env.DB.prepare("SELECT id, username, identifier, created_at, referred_by, email_verified FROM users WHERE id = ?").bind(userId).first();
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  
+  const target = await env.DB.prepare("SELECT id, username, identifier, created_at, referred_by, email_verified, is_operator FROM users WHERE id = ?").bind(userId).first();
+  if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
+
   const wallet = await accrue(env, target.id);
   const investments = (await env.DB.prepare("SELECT id, amount, days, rate, created, credited, active FROM investments WHERE user_id = ?").bind(target.id).all()).results;
   const verificationRequest = await env.DB.prepare("SELECT requested_at, otp_expires_at, verified_at FROM email_verification_requests WHERE user_id = ?").bind(target.id).first();
   const actionVerification = await env.DB.prepare("SELECT action, requested_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(target.id).first();
   const passwordResetRequest = await env.DB.prepare("SELECT requested_at, otp_expires_at, issued_at FROM password_reset_requests WHERE user_id = ?").bind(target.id).first();
-  return Response.json({ user: target, wallet, investments, verificationRequest, actionVerification, passwordResetRequest });
+
+  // Informazioni inviti / referral dettagliate dell'utente
+  const directInvites = (await env.DB.prepare("SELECT id, username, identifier, created_at FROM users WHERE referred_by = ? ORDER BY created_at DESC").bind(target.id).all()).results;
+  const inviteStats = await inviterStats(env, target.id);
+
+  return Response.json({ 
+    user: target, 
+    wallet, 
+    investments, 
+    verificationRequest, 
+    actionVerification, 
+    passwordResetRequest,
+    inviteStats: {
+      directCount: inviteStats.direct,
+      secondCount: inviteStats.second,
+      level: inviteStats.level,
+      directUsers: directInvites
+    }
+  });
+}
+
+async function adminToggleOperator(request, env, userId) {
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+
+  const target = await env.DB.prepare("SELECT id, is_operator, identifier FROM users WHERE id = ?").bind(userId).first();
+  if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
+  if (target.identifier.toLowerCase() === "h9invest@gmail.com") {
+    return bad("Non è possibile modificare i permessi dell'amministratore principale.");
+  }
+
+  const newStatus = target.is_operator ? 0 : 1;
+  await env.DB.prepare("UPDATE users SET is_operator = ? WHERE id = ?").bind(newStatus, userId).run();
+
+  return Response.json({ ok: true, isOperator: !!newStatus });
 }
 
 async function adminUpdateUserBalance(request, env, userId) {
-  const actor = await adminActor(request, env);
-  if (!actor) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  
   const body = await request.json();
   const deposit = Number(body.deposit);
   const earnings = Number(body.earnings);
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare("UPDATE wallets SET deposit = ?, earnings = ? WHERE user_id = ?").bind(deposit, earnings, userId),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(userId, "Saldo wallet aggiornato", "Il tuo wallet è stato modificato dall'amministratore.", now)
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(userId, "Saldo wallet aggiornato", "Il tuo wallet è stato modificato dall'operatore.", now)
   ]);
   return Response.json({ ok: true });
 }
 
 async function adminDeleteUser(request, env, userId) {
-  const actor = await adminActor(request, env);
-  if (!actor) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
   
   const target = await env.DB.prepare("SELECT identifier FROM users WHERE id = ?").bind(userId).first();
   if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
@@ -1030,8 +1128,9 @@ async function adminDeleteUser(request, env, userId) {
 }
 
 async function reviewTransaction(request, env) {
-  const operator = await adminActor(request, env);
+  const operator = await verifyOperatorAccess(request, env);
   if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+  
   const body = await request.json();
   const kind = body.kind;
   const id = Number(body.id);
@@ -1348,7 +1447,8 @@ async function initDb() {
       invite_code TEXT NOT NULL,
       referred_by TEXT,
       created_at INTEGER NOT NULL,
-      email_verified INTEGER NOT NULL DEFAULT 0
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      is_operator INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
@@ -1492,14 +1592,15 @@ async function initDb() {
   const adminEmail = "h9invest@gmail.com";
   let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
   let adminUserId;
-  if (!adminUser)  {
+  if (!adminUser) {
     adminUserId = makeToken();
     const salt = genSalt();
     const ph = await hash(adminEmail, salt);
-    await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)")
+    await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, is_operator, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)")
       .bind(adminUserId, "h9invest", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
   } else {
     adminUserId = adminUser.id;
+    await env.DB.prepare("UPDATE users SET is_operator = 1 WHERE id = ?").bind(adminUserId).run();
   }
   
   const saltAdmin = genSalt();
