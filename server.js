@@ -829,22 +829,16 @@ async function invest(request, env) {
   const stats = await inviterStats(env, user.id);
   const finalRate = plan.rate + (stats.planBonus || 0);
 
-  const useEarnings = !!body.useEarnings;
+  // Modifica per consentire l'utilizzo del saldo guadagni (e/o deposito) per i nuovi investimenti
   let deductDeposit = 0;
   let deductEarnings = 0;
 
-  if (useEarnings) {
-    if (wallet.earnings >= amount) {
-      deductEarnings = amount;
-    } else {
-      deductEarnings = wallet.earnings;
-      deductDeposit = amount - wallet.earnings;
-    }
-  } else {
+  if (wallet.deposit >= amount) {
     deductDeposit = amount;
-  }
-
-  if (deductDeposit > wallet.deposit + 1e-9 || deductEarnings > wallet.earnings + 1e-9) {
+  } else if ((wallet.deposit + wallet.earnings) >= amount) {
+    deductDeposit = wallet.deposit;
+    deductEarnings = amount - wallet.deposit;
+  } else {
     return bad("Saldo insufficiente (controlla saldo deposito e guadagni).");
   }
 
@@ -1498,7 +1492,7 @@ async function initDb() {
   const adminEmail = "h9invest@gmail.com";
   let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
   let adminUserId;
-  if (!adminUser) {
+  if (!adminUser)  {
     adminUserId = makeToken();
     const salt = genSalt();
     const ph = await hash(adminEmail, salt);
