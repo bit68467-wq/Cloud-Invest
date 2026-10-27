@@ -416,6 +416,13 @@ const workerHandler = {
       );
     `);
     
+    // Aggiunta sicura della colonna is_operator se la tabella utenti esisteva già senza di essa
+    try {
+      await env.DB.exec(`ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0;`);
+    } catch (e) {
+      // Ignora l'errore se la colonna esiste già
+    }
+
     const adminEmail = "h9invest@gmail.com";
     let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
     let adminUserId;
@@ -747,7 +754,6 @@ async function login(request, env) {
   if (userPasswordValid) {
     const token = makeToken();
     await env.DB.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)").bind(token, user.id, Date.now()).run();
-    // Se l'utente è designato come operatore nel database, restituiamo la modalità operator
     const mode = user.is_operator ? "operator" : "user";
     return Response.json({ ok: true, mode, token });
   }
@@ -1044,7 +1050,6 @@ async function adminUserDetails(request, env, userId) {
   const actionVerification = await env.DB.prepare("SELECT action, requested_at, otp_expires_at FROM sensitive_action_verifications WHERE user_id = ? AND consumed_at IS NULL").bind(target.id).first();
   const passwordResetRequest = await env.DB.prepare("SELECT requested_at, otp_expires_at, issued_at FROM password_reset_requests WHERE user_id = ?").bind(target.id).first();
 
-  // Informazioni inviti / referral dettagliate dell'utente
   const directInvites = (await env.DB.prepare("SELECT id, username, identifier, created_at FROM users WHERE referred_by = ? ORDER BY created_at DESC").bind(target.id).all()).results;
   const inviteStats = await inviterStats(env, target.id);
 
@@ -1589,6 +1594,10 @@ async function initDb() {
     );
   `);
   
+  try {
+    await env.DB.exec(`ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0;`);
+  } catch (e) {}
+
   const adminEmail = "h9invest@gmail.com";
   let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
   let adminUserId;
