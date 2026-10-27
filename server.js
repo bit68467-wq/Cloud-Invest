@@ -824,13 +824,35 @@ async function invest(request, env) {
   const plan = PLANS.find(p => p.days === days);
   if (!plan) return bad("Piano non valido.");
   if (!Number.isFinite(amount) || amount < plan.min) return bad(`Importo minimo: ${plan.min} USDT.`);
+  
   const wallet = await accrue(env, user.id);
-  if (amount > wallet.deposit + 1e-9) return bad("Saldo deposito insufficiente.");
+  const stats = await inviterStats(env, user.id);
+  const finalRate = plan.rate + (stats.planBonus || 0);
+
+  const useEarnings = !!body.useEarnings;
+  let deductDeposit = 0;
+  let deductEarnings = 0;
+
+  if (useEarnings) {
+    if (wallet.earnings >= amount) {
+      deductEarnings = amount;
+    } else {
+      deductEarnings = wallet.earnings;
+      deductDeposit = amount - wallet.earnings;
+    }
+  } else {
+    deductDeposit = amount;
+  }
+
+  if (deductDeposit > wallet.deposit + 1e-9 || deductEarnings > wallet.earnings + 1e-9) {
+    return bad("Saldo insufficiente (controlla saldo deposito e guadagni).");
+  }
+
   const created = Date.now();
   await env.DB.batch([
-    env.DB.prepare("UPDATE wallets SET deposit = deposit - ? WHERE user_id = ?").bind(amount, user.id),
-    env.DB.prepare("INSERT INTO investments (user_id, amount, days, rate, created, credited, active) VALUES (?, ?, ?, ?, ?, 0, 1)").bind(user.id, amount, plan.days, plan.rate, created),
-    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Investimento avviato", amount.toFixed(2) + " USDT · Piano " + plan.days + " giorni.", created),
+    env.DB.prepare("UPDATE wallets SET deposit = deposit - ?, earnings = earnings - ? WHERE user_id = ?").bind(deductDeposit, deductEarnings, user.id),
+    env.DB.prepare("INSERT INTO investments (user_id, amount, days, rate, created, credited, active) VALUES (?, ?, ?, ?, ?, 0, 1)").bind(user.id, amount, plan.days, finalRate, created),
+    env.DB.prepare("INSERT INTO notifications (user_id, kind, title, message, created_at) VALUES (?, 'transaction', ?, ?, ?)").bind(user.id, "Investimento avviato", amount.toFixed(2) + " USDT · Piano " + plan.days + " giorni (Tasso: " + finalRate.toFixed(2) + "%).", created),
   ]);
   return Response.json({ ok: true, wallet: await accrue(env, user.id) });
 }
