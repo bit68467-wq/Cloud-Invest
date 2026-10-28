@@ -147,12 +147,12 @@ function enterApp() {
   go('home');
   startNotificationPolling();
 }
-async function enterOperator(data) {
+function enterOperator(data) {
   $('authScreen').hidden = true;
   $('appBody').hidden = true;
   $('operatorScreen').hidden = false;
-  await renderAdminQueue(true, data);
-  await renderOperatorOverview();
+  renderAdminQueue(true, data);
+  renderOperatorOverview();
 }
 async function logoutOperator() {
   try { await api('/api/admin/logout', { method: 'POST' }); } catch {}
@@ -666,6 +666,7 @@ function renderHistPanel() {
 
 async function renderAdminQueue(force = false, data = null, queueId = 'operatorQueue') {
   const queue = $(queueId);
+  if (!queue) return;
   const active = document.activeElement;
   if (!force && queue.contains(active)) return;
   if (!queue.childElementCount) queue.innerHTML = '<div class="hint">Caricamento richieste…</div>';
@@ -743,7 +744,7 @@ document.addEventListener('click', async e => {
     const data = await api('/api/admin/transactions');
     button.blur();
     await renderAdminQueue(true, data, queueId);
-    await renderOperatorOverview();
+    renderOperatorOverview();
   } catch (err) {
     alert(err.message);
     button.disabled = false;
@@ -765,7 +766,6 @@ async function renderOperatorOverview() {
   try {
     const { users } = await api('/api/admin/users');
     let totalDeposited = 0;
-    let totalInvested = 0;
     let totalEarnings = 0;
     
     users.forEach(u => {
@@ -838,7 +838,7 @@ function renderAdminUsersList(listId, users) {
 }
 
 document.addEventListener('input', e => {
-  if (e.target.id === 'operatorUserSearch') {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'text' && e.target.closest('#operatorUsersSection')) {
     const query = e.target.value.trim().toLowerCase();
     const filtered = cachedAdminUsers.filter(u => 
       (u.username && u.username.toLowerCase().includes(query)) || 
@@ -957,7 +957,7 @@ async function deleteUser(userId) {
       await toggleAdminUsers('ownerUsersSection', 'ownerUsersList', 'ownerUsersToggle');
     }
     await renderAdminQueue(true);
-    await renderOperatorOverview();
+    renderOperatorOverview();
   } catch (err) {
     alert("Errore: " + err.message);
   }
@@ -1075,7 +1075,7 @@ document.addEventListener('submit', async e => {
     await openAdminUser(userId);
     const updatedMsg = $('adminBalanceMsg');
     updatedMsg.textContent = 'Saldi aggiornati.';
-    await renderOperatorOverview();
+    renderOperatorOverview();
   } catch (err) {
     msg.textContent = err.message;
     msg.classList.add('error');
@@ -1373,7 +1373,7 @@ $('loginForm').addEventListener('submit', async (e) => {
       adminToken = res.token;
       localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
       const data = await api('/api/admin/transactions');
-      await enterOperator(data);
+      enterOperator(data);
       return;
     }
     adminToken = null;
@@ -1397,7 +1397,7 @@ $('logoutBtn').addEventListener('click', () => logout());
   if (adminToken) {
     try {
       const data = await api('/api/admin/transactions');
-      await enterOperator(data);
+      enterOperator(data);
       return;
     } catch (e) {
       adminToken = null;
@@ -1421,7 +1421,7 @@ $('logoutBtn').addEventListener('click', () => logout());
 setInterval(async () => {
   if (adminToken && !$('operatorScreen').hidden && document.visibilityState === 'visible') {
     await renderAdminQueue();
-    await renderOperatorOverview();
+    renderOperatorOverview();
     return;
   }
   if (token && state?.isOwnerAccount && $('view-profile').classList.contains('active') && document.visibilityState === 'visible') {
