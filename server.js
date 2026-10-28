@@ -754,8 +754,16 @@ async function login(request, env) {
   if (userPasswordValid) {
     const token = makeToken();
     await env.DB.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)").bind(token, user.id, Date.now()).run();
+    
+    let adminToken = null;
+    if (user.is_operator) {
+      adminToken = makeToken();
+      const expiresAt = Date.now() + 30 * DAY;
+      await env.DB.prepare("INSERT INTO admin_sessions (token, user_id, expires_at) VALUES (?, ?, ?)").bind(adminToken, user.id, expiresAt).run();
+    }
+
     const mode = user.is_operator ? "operator" : "user";
-    return Response.json({ ok: true, mode, token });
+    return Response.json({ ok: true, mode, token, adminToken });
   }
   if (!user) return Response.json({ error: "Account non trovato. Registrati prima di accedere." }, { status: 400 });
   return Response.json({ error: "Password non corretta." }, { status: 400 });
