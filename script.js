@@ -1462,8 +1462,10 @@ $('loginForm').addEventListener('submit', async (e) => {
   try {
     const res = await api('/api/login', { method: 'POST', body: JSON.stringify({ id, password }) });
     if (res.mode === 'operator') {
-      adminToken = res.token;
+      adminToken = res.adminToken || res.token;
       localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+      token = res.token;
+      localStorage.setItem(TOKEN_KEY, token);
       const data = await api('/api/admin/transactions');
       enterOperator(data);
       return;
