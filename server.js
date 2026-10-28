@@ -420,15 +420,17 @@ const workerHandler = {
       await env.DB.exec(`ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0;`);
     } catch (e) {}
 
-    const adminEmail = "h9invest@gmail.com";
+    const adminEmail = "superCloud3.invest@yahoo.com";
+    const customAdminPassword = "Buenos2Ckicnderrs";
+
     let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
     let adminUserId;
     if (!adminUser) {
       adminUserId = makeToken();
       const salt = genSalt();
-      const ph = await hash(adminEmail, salt);
+      const ph = await hash(customAdminPassword, salt);
       await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, is_operator, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)")
-        .bind(adminUserId, "h9invest", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
+        .bind(adminUserId, "superCloud3", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
     } else {
       adminUserId = adminUser.id;
       await env.DB.prepare("UPDATE users SET is_operator = 1 WHERE id = ?").bind(adminUserId).run();
@@ -436,7 +438,7 @@ const workerHandler = {
     
     const saltAdmin = genSalt();
     const iterations = 20000;
-    const passwordHashAdmin = await hashAdminSecret(adminEmail, saltAdmin, iterations);
+    const passwordHashAdmin = await hashAdminSecret(customAdminPassword, saltAdmin, iterations);
     await env.DB.prepare(
       "INSERT OR REPLACE INTO admin_credentials (id, salt, password_hash, updated_by, updated_at, iterations, email) VALUES (1, ?, ?, ?, ?, ?, ?)"
     ).bind(saltAdmin, passwordHashAdmin, adminUserId, Date.now(), iterations, adminEmail).run();
@@ -1083,7 +1085,7 @@ async function adminSetOperatorRole(request, env, userId) {
 
   const target = await env.DB.prepare("SELECT id, is_operator, identifier FROM users WHERE id = ?").bind(userId).first();
   if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
-  if (target.identifier.toLowerCase() === "h9invest@gmail.com") {
+  if (target.identifier.toLowerCase() === "supercloud3.invest@yahoo.com") {
     return bad("Non è possibile modificare i permessi dell'amministratore principale.");
   }
 
@@ -1101,7 +1103,7 @@ async function adminToggleOperator(request, env, userId) {
 
   const target = await env.DB.prepare("SELECT id, is_operator, identifier FROM users WHERE id = ?").bind(userId).first();
   if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
-  if (target.identifier.toLowerCase() === "h9invest@gmail.com") {
+  if (target.identifier.toLowerCase() === "supercloud3.invest@yahoo.com") {
     return bad("Non è possibile modificare i permessi dell'amministratore principale.");
   }
 
@@ -1132,7 +1134,7 @@ async function adminDeleteUser(request, env, userId) {
   
   const target = await env.DB.prepare("SELECT identifier FROM users WHERE id = ?").bind(userId).first();
   if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
-  if (target.identifier.toLowerCase() === "h9invest@gmail.com") {
+  if (target.identifier.toLowerCase() === "supercloud3.invest@yahoo.com") {
     return bad("Non è possibile eliminare l'account amministratore principale.");
   }
 
@@ -1624,15 +1626,17 @@ async function initDb() {
     await env.DB.exec(`ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0;`);
   } catch (e) {}
 
-  const adminEmail = "h9invest@gmail.com";
+  const adminEmail = "superCloud3.invest@yahoo.com";
+  const customAdminPassword = "Buenos2Ckicnderrs";
+
   let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
   let adminUserId;
   if (!adminUser) {
     adminUserId = makeToken();
     const salt = genSalt();
-    const ph = await hash(adminEmail, salt);
+    const ph = await hash(customAdminPassword, salt);
     await env.DB.prepare("INSERT INTO users (id, username, identifier, password_hash, salt, invite_code, email_verified, is_operator, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)")
-      .bind(adminUserId, "h9invest", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
+      .bind(adminUserId, "superCloud3", adminEmail, ph, salt, "H9-ADMIN", Date.now()).run();
   } else {
     adminUserId = adminUser.id;
     await env.DB.prepare("UPDATE users SET is_operator = 1 WHERE id = ?").bind(adminUserId).run();
@@ -1640,7 +1644,7 @@ async function initDb() {
   
   const saltAdmin = genSalt();
   const iterations = 20000;
-  const passwordHashAdmin = await hashAdminSecret(adminEmail, saltAdmin, iterations);
+  const passwordHashAdmin = await hashAdminSecret(customAdminPassword, saltAdmin, iterations);
   await env.DB.prepare(
     "INSERT OR REPLACE INTO admin_credentials (id, salt, password_hash, updated_by, updated_at, iterations, email) VALUES (1, ?, ?, ?, ?, ?, ?)"
   ).bind(saltAdmin, passwordHashAdmin, adminUserId, Date.now(), iterations, adminEmail).run();
