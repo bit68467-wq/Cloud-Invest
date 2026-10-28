@@ -152,6 +152,7 @@ function enterOperator(data) {
   $('appBody').hidden = true;
   $('operatorScreen').hidden = false;
   renderAdminQueue(true, data);
+  renderOperatorOverview(); // Inserita la tabella statistiche generali nel pannello operatore
 }
 async function logoutOperator() {
   try { await api('/api/admin/logout', { method: 'POST' }); } catch {}
@@ -728,6 +729,63 @@ async function renderAdminQueue(force = false, data = null, queueId = 'operatorQ
   }
 }
 
+// Funzione aggiunta per mostrare la tabella di statistiche generali nel pannello operatore
+async function renderOperatorOverview() {
+  let overviewContainer = $('operatorOverviewSection');
+  if (!overviewContainer) {
+    const main = document.querySelector('#operatorScreen .screen');
+    if (main) {
+      overviewContainer = document.createElement('section');
+      overviewContainer.id = 'operatorOverviewSection';
+      main.insertBefore(overviewContainer, main.firstChild);
+    }
+  }
+  if (!overviewContainer) return;
+
+  try {
+    const { users } = await api('/api/admin/users');
+    let totalDeposited = 0;
+    let totalEarnings = 0;
+    
+    (users || []).forEach(u => {
+      totalDeposited += Number(u.wallet?.deposit || 0) + Number(u.wallet?.total_deposited || 0);
+      totalEarnings += Number(u.wallet?.earnings || 0) + Number(u.wallet?.total_earned || 0);
+    });
+
+    overviewContainer.innerHTML = `
+      <div style="background: var(--bg-card, #1e1e1e); border-radius: 12px; padding: 20px; margin-bottom: 20px; color: #fff;">
+        <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 1.1rem; color: var(--accent, #c6a76a);">📊 Panoramica Generale Piattaforma</h3>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+            <thead>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); color: #aaa;">
+                <th style="padding: 10px;">Metrica / Categoria</th>
+                <th style="padding: 10px; text-align: right;">Valore / Totale</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">👥 Utenti Registrati Totali</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold;">${users ? users.length : 0}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">💰 Depositi e Fondi Totali</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold; color: var(--green, #2ecc71);">${fmt(totalDeposited)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px;">📈 Guadagni Generati Complessivi</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold;">${fmt(totalEarnings)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    overviewContainer.innerHTML = '';
+  }
+}
+
 document.addEventListener('click', async e => {
   const button = e.target.closest('[data-review]');
   if (!button) return;
@@ -742,6 +800,7 @@ document.addEventListener('click', async e => {
     const data = await api('/api/admin/transactions');
     button.blur();
     await renderAdminQueue(true, data, queueId);
+    renderOperatorOverview();
   } catch (err) {
     alert(err.message);
     button.disabled = false;
@@ -901,6 +960,7 @@ async function deleteUser(userId) {
       await toggleAdminUsers('ownerUsersSection', 'ownerUsersList', 'ownerUsersToggle');
     }
     await renderAdminQueue(true);
+    renderOperatorOverview();
   } catch (err) {
     alert("Errore: " + err.message);
   }
@@ -1018,6 +1078,7 @@ document.addEventListener('submit', async e => {
     await openAdminUser(userId);
     const updatedMsg = $('adminBalanceMsg');
     updatedMsg.textContent = 'Saldi aggiornati.';
+    renderOperatorOverview();
   } catch (err) {
     msg.textContent = err.message;
     msg.classList.add('error');
@@ -1363,6 +1424,7 @@ $('logoutBtn').addEventListener('click', () => logout());
 setInterval(async () => {
   if (adminToken && !$('operatorScreen').hidden && document.visibilityState === 'visible') {
     await renderAdminQueue();
+    renderOperatorOverview();
     return;
   }
   if (token && state?.isOwnerAccount && $('view-profile').classList.contains('active') && document.visibilityState === 'visible') {
