@@ -729,7 +729,7 @@ async function renderAdminQueue(force = false, data = null, queueId = 'operatorQ
   }
 }
 
-// Funzione aggiunta per mostrare la tabella di statistiche generali nel pannello operatore
+// Funzione aggiornata per mostrare la tabella di statistiche generali reali nel pannello operatore
 async function renderOperatorOverview() {
   let overviewContainer = $('operatorOverviewSection');
   if (!overviewContainer) {
@@ -743,14 +743,34 @@ async function renderOperatorOverview() {
   if (!overviewContainer) return;
 
   try {
-    const { users } = await api('/api/admin/users');
+    const res = await api('/api/admin/users');
+    const users = res.users || [];
+    
     let totalDeposited = 0;
     let totalEarnings = 0;
     
-    (users || []).forEach(u => {
-      totalDeposited += Number(u.wallet?.deposit || 0) + Number(u.wallet?.total_deposited || 0);
-      totalEarnings += Number(u.wallet?.earnings || 0) + Number(u.wallet?.total_earned || 0);
-    });
+    for (const u of users) {
+      let uDeposit = Number(u.wallet?.deposit ?? u.deposit ?? 0);
+      let uTotalDep = Number(u.wallet?.total_deposited ?? u.total_deposited ?? 0);
+      let uEarnings = Number(u.wallet?.earnings ?? u.earnings ?? 0);
+      let uTotalEarned = Number(u.wallet?.total_earned ?? u.total_earned ?? 0);
+
+      // Se i dettagli del portafoglio non sono presenti nell'elenco sintetico, interroga il singolo utente
+      if (!u.wallet && u.id) {
+        try {
+          const detail = await api(`/api/admin/users/${encodeURIComponent(u.id)}`);
+          if (detail && detail.wallet) {
+            uDeposit = Number(detail.wallet.deposit || 0);
+            uTotalDep = Number(detail.wallet.total_deposited || 0);
+            uEarnings = Number(detail.wallet.earnings || 0);
+            uTotalEarned = Number(detail.wallet.total_earned || 0);
+          }
+        } catch {}
+      }
+
+      totalDeposited += (uDeposit + uTotalDep);
+      totalEarnings += (uEarnings + uTotalEarned);
+    }
 
     overviewContainer.innerHTML = `
       <div style="background: var(--bg-card, #1e1e1e); border-radius: 12px; padding: 20px; margin-bottom: 20px; color: #fff;">
@@ -766,7 +786,7 @@ async function renderOperatorOverview() {
             <tbody>
               <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                 <td style="padding: 10px;">👥 Utenti Registrati Totali</td>
-                <td style="padding: 10px; text-align: right; font-weight: bold;">${users ? users.length : 0}</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold;">${users.length}</td>
               </tr>
               <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                 <td style="padding: 10px;">💰 Depositi e Fondi Totali</td>
