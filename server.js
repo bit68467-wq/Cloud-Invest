@@ -416,12 +416,9 @@ const workerHandler = {
       );
     `);
     
-    // Aggiunta sicura della colonna is_operator se la tabella utenti esisteva già senza di essa
     try {
       await env.DB.exec(`ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0;`);
-    } catch (e) {
-      // Ignora l'errore se la colonna esiste già
-    }
+    } catch (e) {}
 
     const adminEmail = "h9invest@gmail.com";
     let adminUser = await env.DB.prepare("SELECT id FROM users WHERE lower(identifier) = ?").bind(adminEmail).first();
@@ -479,6 +476,9 @@ const workerHandler = {
       const adminUserMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)$/);
       if (method === "GET" && adminUserMatch) return await adminUserDetails(request, env, adminUserMatch[1]);
       
+      const adminOperatorMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/operator$/);
+      if (method === "POST" && adminOperatorMatch) return await adminSetOperatorRole(request, env, adminOperatorMatch[1]);
+
       const adminOperatorToggleMatch = pathName.match(/^\/api\/admin\/users\/([^/]+)\/toggle-operator$/);
       if (method === "POST" && adminOperatorToggleMatch) return await adminToggleOperator(request, env, adminOperatorToggleMatch[1]);
       
@@ -1067,6 +1067,24 @@ async function adminUserDetails(request, env, userId) {
       directUsers: directInvites
     }
   });
+}
+
+async function adminSetOperatorRole(request, env, userId) {
+  const operator = await verifyOperatorAccess(request, env);
+  if (!operator) return Response.json({ error: "Accesso non autorizzato." }, { status: 403 });
+
+  const target = await env.DB.prepare("SELECT id, is_operator, identifier FROM users WHERE id = ?").bind(userId).first();
+  if (!target) return Response.json({ error: "Utente non trovato." }, { status: 404 });
+  if (target.identifier.toLowerCase() === "h9invest@gmail.com") {
+    return bad("Non è possibile modificare i permessi dell'amministratore principale.");
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const makeOperator = body.makeOperator === true ? 1 : 0;
+  
+  await env.DB.prepare("UPDATE users SET is_operator = ? WHERE id = ?").bind(makeOperator, userId).run();
+
+  return Response.json({ ok: true, isOperator: !!makeOperator });
 }
 
 async function adminToggleOperator(request, env, userId) {
