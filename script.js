@@ -1,4 +1,4 @@
-Const TOKEN_KEY = 'h9_token';
+const TOKEN_KEY = 'h9_token';
 const ADMIN_TOKEN_KEY = 'h9_admin_token';
 const DAY = 86400000;
 
@@ -152,7 +152,6 @@ function enterOperator(data) {
   $('appBody').hidden = true;
   $('operatorScreen').hidden = false;
   renderAdminQueue(true, data);
-  renderOperatorOverview();
 }
 async function logoutOperator() {
   try { await api('/api/admin/logout', { method: 'POST' }); } catch {}
@@ -666,7 +665,6 @@ function renderHistPanel() {
 
 async function renderAdminQueue(force = false, data = null, queueId = 'operatorQueue') {
   const queue = $(queueId);
-  if (!queue) return;
   const active = document.activeElement;
   if (!force && queue.contains(active)) return;
   if (!queue.childElementCount) queue.innerHTML = '<div class="hint">Caricamento richieste…</div>';
@@ -744,47 +742,11 @@ document.addEventListener('click', async e => {
     const data = await api('/api/admin/transactions');
     button.blur();
     await renderAdminQueue(true, data, queueId);
-    renderOperatorOverview();
   } catch (err) {
     alert(err.message);
     button.disabled = false;
   }
 });
-
-async function renderOperatorOverview() {
-  let overviewContainer = $('operatorOverviewSection');
-  if (!overviewContainer) {
-    const main = document.querySelector('#operatorScreen .screen');
-    if (main) {
-      overviewContainer = document.createElement('section');
-      overviewContainer.id = 'operatorOverviewSection';
-      main.insertBefore(overviewContainer, main.firstChild);
-    }
-  }
-  if (!overviewContainer) return;
-
-  try {
-    const { users } = await api('/api/admin/users');
-    let totalDeposited = 0;
-    let totalEarnings = 0;
-    
-    users.forEach(u => {
-      totalDeposited += Number(u.wallet?.deposit || 0) + Number(u.wallet?.total_deposited || 0);
-      totalEarnings += Number(u.wallet?.earnings || 0) + Number(u.wallet?.total_earned || 0);
-    });
-
-    overviewContainer.innerHTML = `
-      <h2 class="section-title">Panoramica Piattaforma</h2>
-      <div class="stats-grid" style="margin-bottom: 20px;">
-        <div class="stat">Utenti registrati<span>${users.length}</span></div>
-        <div class="stat">Depositi Totali<span>${fmt(totalDeposited)}</span></div>
-        <div class="stat">Guadagni Totali<span>${fmt(totalEarnings)}</span></div>
-      </div>
-    `;
-  } catch (err) {
-    overviewContainer.innerHTML = '';
-  }
-}
 
 $('adminCredentialSetup').addEventListener('submit', async e => {
   e.preventDefault();
@@ -809,7 +771,6 @@ $('adminCredentialSetup').addEventListener('submit', async e => {
   button.disabled = false;
 });
 
-let cachedAdminUsers = [];
 async function toggleAdminUsers(sectionId, listId, buttonId) {
   const section = $(sectionId);
   const button = $(buttonId);
@@ -819,34 +780,17 @@ async function toggleAdminUsers(sectionId, listId, buttonId) {
   const list = $(listId);
   list.innerHTML = '<div class="hint">Caricamento utenti…</div>';
   try {
-    const data = await api('/api/admin/users');
-    cachedAdminUsers = data.users || [];
+    const { users } = await api('/api/admin/users');
     if (sectionId === 'ownerUsersSection' && !state?.isOwnerAccount) { section.hidden = true; list.replaceChildren(); return; }
-    renderAdminUsersList(listId, cachedAdminUsers);
+    list.innerHTML = users.length ? users.map(user =>
+      '<div class="wd-row"><div><div class="wd-net"><button class="admin-user-link" type="button" data-admin-user="' + escapeHTML(user.id) + '">' + escapeHTML(user.username) +
+      '</button></div><div class="wd-sub"><button class="admin-user-link" type="button" data-admin-user="' + escapeHTML(user.id) + '">' + escapeHTML(user.identifier) + '</button> · ' +
+      (user.email_verified ? 'Email verificata' : 'Email da verificare') + ' · Iscritto il ' + new Date(user.created_at).toLocaleDateString('it-IT') + '</div></div></div>'
+    ).join('') : '<div class="empty"><p>Nessun utente registrato.</p></div>';
   } catch (err) {
     list.innerHTML = '<p class="panel-msg error">' + escapeHTML(err.message) + '</p>';
   }
 }
-
-function renderAdminUsersList(listId, users) {
-  const list = $(listId);
-  list.innerHTML = users.length ? users.map(user =>
-    '<div class="wd-row"><div><div class="wd-net"><button class="admin-user-link" type="button" data-admin-user="' + escapeHTML(user.id) + '">' + escapeHTML(user.username) +
-    '</button></div><div class="wd-sub"><button class="admin-user-link" type="button" data-admin-user="' + escapeHTML(user.id) + '">' + escapeHTML(user.identifier) + '</button> · ' +
-    (user.email_verified ? 'Email verificata' : 'Email da verificare') + ' · Iscritto il ' + new Date(user.created_at).toLocaleDateString('it-IT') + '</div></div></div>'
-  ).join('') : '<div class="empty"><p>Nessun utente trovato.</p></div>';
-}
-
-document.addEventListener('input', e => {
-  if (e.target.tagName === 'INPUT' && e.target.type === 'text' && e.target.closest('#operatorUsersSection')) {
-    const query = e.target.value.trim().toLowerCase();
-    const filtered = cachedAdminUsers.filter(u => 
-      (u.username && u.username.toLowerCase().includes(query)) || 
-      (u.identifier && u.identifier.toLowerCase().includes(query))
-    );
-    renderAdminUsersList('operatorUsersList', filtered);
-  }
-});
 
 function adminVerificationMarkup(user, request) {
   let html = '<section class="admin-verification"><h3 class="block-title">Verifica email</h3>';
@@ -957,7 +901,6 @@ async function deleteUser(userId) {
       await toggleAdminUsers('ownerUsersSection', 'ownerUsersList', 'ownerUsersToggle');
     }
     await renderAdminQueue(true);
-    renderOperatorOverview();
   } catch (err) {
     alert("Errore: " + err.message);
   }
@@ -1075,7 +1018,6 @@ document.addEventListener('submit', async e => {
     await openAdminUser(userId);
     const updatedMsg = $('adminBalanceMsg');
     updatedMsg.textContent = 'Saldi aggiornati.';
-    renderOperatorOverview();
   } catch (err) {
     msg.textContent = err.message;
     msg.classList.add('error');
@@ -1421,7 +1363,6 @@ $('logoutBtn').addEventListener('click', () => logout());
 setInterval(async () => {
   if (adminToken && !$('operatorScreen').hidden && document.visibilityState === 'visible') {
     await renderAdminQueue();
-    renderOperatorOverview();
     return;
   }
   if (token && state?.isOwnerAccount && $('view-profile').classList.contains('active') && document.visibilityState === 'visible') {
