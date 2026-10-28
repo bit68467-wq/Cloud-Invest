@@ -152,7 +152,7 @@ function enterOperator(data) {
   $('appBody').hidden = true;
   $('operatorScreen').hidden = false;
   renderAdminQueue(true, data);
-  renderOperatorOverview(); // Inserita la tabella statistiche generali nel pannello operatore
+  renderOperatorOverview();
 }
 async function logoutOperator() {
   try { await api('/api/admin/logout', { method: 'POST' }); } catch {}
@@ -729,7 +729,7 @@ async function renderAdminQueue(force = false, data = null, queueId = 'operatorQ
   }
 }
 
-// Funzione aggiornata per mostrare la tabella di statistiche generali reali nel pannello operatore
+// Panoramica Dettagliata Piattaforma (Modifica 1)
 async function renderOperatorOverview() {
   let overviewContainer = $('operatorOverviewSection');
   if (!overviewContainer) {
@@ -748,14 +748,18 @@ async function renderOperatorOverview() {
     
     let totalDeposited = 0;
     let totalEarnings = 0;
+    let totalInvestedActive = 0;
+    let totalWithdrawn = 0;
+    let activeUsersCount = 0;
     
     for (const u of users) {
       let uDeposit = Number(u.wallet?.deposit ?? u.deposit ?? 0);
       let uTotalDep = Number(u.wallet?.total_deposited ?? u.total_deposited ?? 0);
       let uEarnings = Number(u.wallet?.earnings ?? u.earnings ?? 0);
       let uTotalEarned = Number(u.wallet?.total_earned ?? u.total_earned ?? 0);
+      let uWithdrawn = Number(u.wallet?.total_withdrawn ?? u.total_withdrawn ?? 0);
 
-      // Se i dettagli del portafoglio non sono presenti nell'elenco sintetico, interroga il singolo utente
+      let uInvested = 0;
       if (!u.wallet && u.id) {
         try {
           const detail = await api(`/api/admin/users/${encodeURIComponent(u.id)}`);
@@ -764,17 +768,29 @@ async function renderOperatorOverview() {
             uTotalDep = Number(detail.wallet.total_deposited || 0);
             uEarnings = Number(detail.wallet.earnings || 0);
             uTotalEarned = Number(detail.wallet.total_earned || 0);
+            uWithdrawn = Number(detail.wallet.total_withdrawn || 0);
+          }
+          if (detail && detail.investments) {
+            uInvested = detail.investments.filter(i => i.active).reduce((sum, i) => sum + Number(i.amount || 0), 0);
           }
         } catch {}
+      } else if (u.investments) {
+        uInvested = u.investments.filter(i => i.active).reduce((sum, i) => sum + Number(i.amount || 0), 0);
       }
 
       totalDeposited += (uDeposit + uTotalDep);
       totalEarnings += (uEarnings + uTotalEarned);
+      totalInvestedActive += uInvested;
+      totalWithdrawn += uWithdrawn;
+
+      if ((uDeposit + uTotalDep) > 0 || uInvested > 0) {
+        activeUsersCount++;
+      }
     }
 
     overviewContainer.innerHTML = `
       <div style="background: var(--bg-card, #1e1e1e); border-radius: 12px; padding: 20px; margin-bottom: 20px; color: #fff;">
-        <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 1.1rem; color: var(--accent, #c6a76a);">📊 Panoramica Generale Piattaforma</h3>
+        <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 1.1rem; color: var(--accent, #c6a76a);">📊 Panoramica Dettagliata Piattaforma</h3>
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
             <thead>
@@ -785,16 +801,24 @@ async function renderOperatorOverview() {
             </thead>
             <tbody>
               <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                <td style="padding: 10px;">👥 Utenti Registrati Totali</td>
-                <td style="padding: 10px; text-align: right; font-weight: bold;">${users.length}</td>
+                <td style="padding: 10px;">👥 Utenti Registrati (Attivi / Totali)</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold;">${activeUsersCount} / ${users.length}</td>
               </tr>
               <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                 <td style="padding: 10px;">💰 Depositi e Fondi Totali</td>
                 <td style="padding: 10px; text-align: right; font-weight: bold; color: var(--green, #2ecc71);">${fmt(totalDeposited)}</td>
               </tr>
-              <tr>
-                <td style="padding: 10px;">📈 Guadagni Generati Complessivi</td>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">📈 Capitale Attualmente Investito</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold; color: #3498db;">${fmt(totalInvestedActive)}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">🎁 Guadagni Generati Complessivi</td>
                 <td style="padding: 10px; text-align: right; font-weight: bold;">${fmt(totalEarnings)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px;">📤 Prelievi Totali Eseguiti</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold; color: var(--accent-2, #e74c3c);">${fmt(totalWithdrawn)}</td>
               </tr>
             </tbody>
           </table>
@@ -917,6 +941,21 @@ function adminPasswordResetMarkup(request) {
     '<form class="admin-otp-form" id="adminPasswordResetOtpForm"><label for="adminPasswordResetOtpInput">Imposta OTP a 6 cifre</label><input id="adminPasswordResetOtpInput" name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required><button class="btn-primary" type="submit">Salva OTP</button><button class="btn-primary" type="submit" data-otp-notify="true">Salva e invia notifica</button><p class="panel-msg" id="adminPasswordResetOtpMsg" role="status"></p><a class="btn-primary mail-link" id="adminPasswordResetEmailLink" hidden>Prepara email OTP</a></form></section>';
 }
 
+// Gestione Ruolo Operatore (Modifica 2: designare o rimuovere operatori)
+function adminOperatorRoleMarkup(user) {
+  const isOp = !!user.is_operator || !!user.isOperator;
+  return `
+    <section class="admin-verification">
+      <h3 class="block-title">Ruolo Operatore</h3>
+      <p class="admin-user-contact">Stato attuale: <b>${isOp ? 'Operatore Attivo' : 'Utente Standard'}</b></p>
+      <button class="btn-primary ${isOp ? 'reject' : ''}" type="button" id="toggleOperatorRoleBtn" data-is-operator="${isOp}">
+        ${isOp ? 'Rimuovi ruolo operatore' : 'Designa come operatore'}
+      </button>
+      <p class="panel-msg" id="adminOperatorRoleMsg" role="status"></p>
+    </section>
+  `;
+}
+
 async function openAdminUser(userId) {
   const modal = $('adminUserModal');
   const detail = $('adminUserDetail');
@@ -936,6 +975,7 @@ async function openAdminUser(userId) {
       ${adminVerificationMarkup(user, verificationRequest)}
       ${adminActionVerificationMarkup(actionVerification)}
       ${adminPasswordResetMarkup(passwordResetRequest)}
+      ${adminOperatorRoleMarkup(user)}
       <div class="admin-user-stats">
         <div class="stat"><span>Saldo deposito</span><b>${fmt(wallet.deposit)}</b></div>
         <div class="stat"><span>Saldo guadagni</span><b>${fmt(wallet.earnings)}</b></div>
@@ -992,11 +1032,40 @@ $('adminDeleteUserBtn')?.addEventListener('click', async () => {
   await deleteUser(userId);
 });
 
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   const userLink = e.target.closest('[data-admin-user]');
   if (userLink) openAdminUser(userLink.dataset.adminUser);
   if (e.target === $('adminUserModal') || e.target.closest('#adminUserClose')) $('adminUserModal').hidden = true;
+
+  // Gestione click pulsante toggle ruolo operatore
+  if (e.target.id === 'toggleOperatorRoleBtn') {
+    const btn = e.target;
+    const userId = $('adminUserModal').dataset.userId;
+    const currentlyOperator = btn.dataset.isOperator === 'true';
+    const actionName = currentlyOperator ? 'rimuovere il ruolo di operatore da' : 'designare come operatore';
+    
+    if (!confirm(`Confermi di voler ${actionName} questo utente?`)) return;
+    
+    btn.disabled = true;
+    const msg = $('adminOperatorRoleMsg');
+    msg.textContent = 'Aggiornamento in corso...';
+    msg.classList.remove('error');
+    
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(userId)}/operator`, {
+        method: 'POST',
+        body: JSON.stringify({ makeOperator: !currentlyOperator })
+      });
+      msg.textContent = 'Ruolo aggiornato con successo.';
+      await openAdminUser(userId);
+    } catch (err) {
+      msg.textContent = err.message;
+      msg.classList.add('error');
+      btn.disabled = false;
+    }
+  }
 });
+
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     $('adminUserModal').hidden = true;
